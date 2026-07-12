@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Consensus Scanner",
+    "slug": "anakin-consensus",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Point your camera at a product to research it."
+      }
+    },
+    "android": {
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Point your camera at a product to research it."
+        }
+      ]
+    ]
+  }
+}
