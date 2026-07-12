@@ -1,87 +1,69 @@
-import { search, scrapeBatch, type SearchResult, type ScrapedPage } from "./anakin.js";
+import type { ScrapedPage } from "./anakin.js";
+import { firecrawlEnabled } from "./firecrawl.js";
 import { synthesizeReport } from "./claude.js";
+import { extractBuyLinks, type BuyLink } from "./buylinks.js";
+import { CreditTracker, scrapeWithFallback, searchMany, selectUrls, type SourceQuery } from "./webResearch.js";
 import type { ConsensusReport, ProductIdentity } from "./schema.js";
 
-const SEARCH_TIMEOUT_MS = 9000;
-const SCRAPE_TIMEOUT_MS = 15000;
-const MAX_URLS_TO_SCRAPE = 8;
-
-interface SourceQuery {
-  type: string;
-  prompt: string;
+export interface ResearchResult {
+  report: ConsensusReport;
+  buyLinks: BuyLink[];
 }
 
+const SEARCH_TIMEOUT_MS = 12000;
+const SCRAPE_TIMEOUT_MS = 22000;
+const SCRAPE_ONE_TIMEOUT_MS = 12000;
+const MAX_URLS_TO_SCRAPE = 6;
+
+/**
+ * Source-scoped queries. Each costs 3 credits, so the set is kept lean while
+ * still spanning the platforms that drive purchase consensus.
+ */
 function buildQueries(term: string): SourceQuery[] {
   return [
     { type: "reddit", prompt: `site:reddit.com ${term} long term review problems worth it` },
-    { type: "amazon", prompt: `site:amazon.com OR site:amazon.in ${term} customer reviews rating` },
-    { type: "flipkart", prompt: `site:flipkart.com ${term} customer reviews rating` },
+    { type: "retail", prompt: `${term} customer reviews rating amazon flipkart` },
     { type: "youtube", prompt: `site:youtube.com ${term} review after months` },
-    { type: "blog_forum", prompt: `${term} common problems reliability owners complaints forum blog` },
+    { type: "blog_forum", prompt: `${term} common problems reliability owners complaints forum` },
     { type: "news", prompt: `${term} review verdict should you buy` },
-    { type: "official", prompt: `${term} official specifications features manufacturer page` },
     { type: "price", prompt: `${term} price history discount best time to buy deal` },
   ];
 }
 
-function hostname(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
-}
-
-/** Rank + dedupe citations: prefer source-type diversity, cap total. */
-function selectUrls(
-  grouped: { type: string; results: SearchResult[] }[]
-): { url: string; type: string; title: string }[] {
-  const seen = new Set<string>();
-  const picked: { url: string; type: string; title: string }[] = [];
-  let round = 0;
-  const maxRound = Math.max(...grouped.map((g) => g.results.length), 0);
-  while (picked.length < MAX_URLS_TO_SCRAPE && round < maxRound) {
-    for (const g of grouped) {
-      const r = g.results[round];
-      if (!r?.url) continue;
-      const key = hostname(r.url) + new URL(r.url, "https://x").pathname;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      picked.push({ url: r.url, type: g.type, title: r.title });
-      if (picked.length >= MAX_URLS_TO_SCRAPE) break;
-    }
-    round++;
-  }
-  return picked;
-}
-
-export async function runResearch(product: ProductIdentity): Promise<ConsensusReport> {
+export async function runResearch(product: ProductIdentity): Promise<ResearchResult> {
   const term = product.searchTerm || product.name;
   const queries = buildQueries(term);
+  const tracker = new CreditTracker();
 
-  const grouped = await Promise.all(
-    queries.map(async (q) => ({
-      type: q.type,
-      results: await withTimeout(search(q.prompt, 5), SEARCH_TIMEOUT_MS, [] as SearchResult[]),
-    }))
+  // A single failing search must not discard the credits already spent on the
+  // others - searchMany catches per query so partial results still produce a report.
+  const grouped = await searchMany(queries, tracker, { limit: 5, timeoutMs: SEARCH_TIMEOUT_MS });
+
+  const picked = selectUrls(grouped, MAX_URLS_TO_SCRAPE);
+
+  // Nothing to ground the report on. Fail loudly instead of paying Claude to
+  // hallucinate from an empty corpus.
+  if (picked.length === 0) {
+    if (tracker.error && !firecrawlEnabled()) throw tracker.error;
+    throw new Error(
+      `No sources found for "${term}". Both Anakin and the Firecrawl fallback returned no usable citations.`
+    );
+  }
+
+  const byUrl = await scrapeWithFallback(
+    picked.map((p) => p.url),
+    tracker,
+    { batchTimeoutMs: SCRAPE_TIMEOUT_MS, oneTimeoutMs: SCRAPE_ONE_TIMEOUT_MS }
   );
 
-  const picked = selectUrls(grouped);
-  const scraped = await scrapeBatch(picked.map((p) => p.url), { timeoutMs: SCRAPE_TIMEOUT_MS }).catch(
-    () => [] as ScrapedPage[]
-  );
+  // Last resort: use the search snippet so Claude always has some grounding per
+  // citation, never a blank source.
+  const pages: ScrapedPage[] = picked.map((p) => byUrl.get(p.url) ?? { url: p.url, markdown: p.title });
 
-  // Anakin scrapes some sources but not others in time (or a scrape fails) - fall back to the
-  // search snippet for those so Claude always has some grounding, never a blank source.
-  const scrapedByUrl = new Map(scraped.map((p) => [p.url, p]));
-  const pages: ScrapedPage[] = picked.map((p) => scrapedByUrl.get(p.url) ?? { url: p.url, markdown: p.title });
+  // Free (already-fetched) real citations filtered to known retail domains - no
+  // extra Anakin/Firecrawl calls, never invented by the LLM.
+  const buyLinks = extractBuyLinks(grouped);
 
-  return synthesizeReport(product, pages);
+  const report = await synthesizeReport(product, pages);
+  return { report, buyLinks };
 }

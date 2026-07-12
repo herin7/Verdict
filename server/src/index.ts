@@ -3,6 +3,9 @@ import cors from "@fastify/cors";
 import { config } from "./config.js";
 import { identifyRoute } from "./routes/identify.js";
 import { researchRoute } from "./routes/research.js";
+import { buyLinkRoute } from "./routes/buyLink.js";
+import { insightsRoute } from "./routes/insights.js";
+import { productImageRoute } from "./routes/productImage.js";
 
 const app = Fastify({
   logger: true,
@@ -12,6 +15,9 @@ const app = Fastify({
 await app.register(cors, { origin: true });
 await app.register(identifyRoute);
 await app.register(researchRoute);
+await app.register(buyLinkRoute);
+await app.register(insightsRoute);
+await app.register(productImageRoute);
 
 app.get("/health", async () => ({ ok: true }));
 

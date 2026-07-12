@@ -40,3 +40,59 @@ export const ConsensusReportSchema = z.object({
   sources: z.array(ReportSourceSchema),
 });
 export type ConsensusReport = z.infer<typeof ConsensusReportSchema>;
+
+// --- Deep-dive insights -----------------------------------------------------
+// Each is fetched lazily/on-demand from the client, independent of the main
+// report, so a slow or failed insight never blocks the core verdict.
+
+export const LongTermScoreSchema = z.object({
+  score: z.number().min(0).max(100),
+  trend: z.enum(["improving", "declining", "stable", "mixed"]),
+  timeline: z.array(
+    z.object({
+      period: z.string(),
+      sentiment: z.enum(["positive", "negative", "mixed"]),
+      note: z.string(),
+    })
+  ),
+  summary: z.string(),
+});
+export type LongTermScore = z.infer<typeof LongTermScoreSchema>;
+
+export const VersionHistorySchema = z.object({
+  hasPreviousVersion: z.boolean(),
+  previousVersion: z.string().nullable(),
+  changes: z.array(
+    z.object({
+      aspect: z.string(),
+      verdict: z.enum(["better", "worse", "same"]),
+      note: z.string(),
+    })
+  ),
+  worthUpgrading: z.enum(["yes", "no", "not_applicable"]),
+  summary: z.string(),
+});
+export type VersionHistory = z.infer<typeof VersionHistorySchema>;
+
+export const ScamDetectorSchema = z.object({
+  riskLevel: z.enum(["low", "medium", "high"]),
+  fakeReviewEstimatePercent: z.number().min(0).max(100).nullable(),
+  counterfeitRisk: z.enum(["low", "medium", "high"]),
+  redFlags: z.array(z.string()),
+  summary: z.string(),
+});
+export type ScamDetector = z.infer<typeof ScamDetectorSchema>;
+
+export const BestInCategorySchema = z.object({
+  rank: z.string(),
+  categoryScore: z.number().min(0).max(100),
+  competitors: z.array(
+    z.object({
+      name: z.string(),
+      comparison: z.enum(["better", "worse", "similar"]),
+      note: z.string(),
+    })
+  ),
+  summary: z.string(),
+});
+export type BestInCategory = z.infer<typeof BestInCategorySchema>;

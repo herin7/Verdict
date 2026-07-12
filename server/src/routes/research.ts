@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ProductIdentitySchema } from "../schema.js";
 import { runResearch } from "../pipeline.js";
+import { AnakinCreditError } from "../anakin.js";
 
 export async function researchRoute(app: FastifyInstance) {
   app.post("/research", async (req, reply) => {
@@ -21,10 +22,13 @@ export async function researchRoute(app: FastifyInstance) {
       ...parsed.data,
     };
     try {
-      const report = await runResearch(product);
-      return { report };
+      const { report, buyLinks } = await runResearch(product);
+      return { report, buyLinks };
     } catch (err) {
       req.log.error(err);
+      if (err instanceof AnakinCreditError) {
+        return reply.code(402).send({ error: err.message, code: "out_of_credits" });
+      }
       return reply.code(502).send({ error: (err as Error).message });
     }
   });

@@ -13,7 +13,9 @@
       }
     },
     "android": {
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "plugins": [
       [
@@ -21,7 +23,10 @@
         {
           "cameraPermission": "Point your camera at a product to research it."
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-font",
+      "expo-splash-screen"
     ]
   }
 }
