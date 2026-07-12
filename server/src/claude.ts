@@ -7,6 +7,7 @@ import {
   type ProductIdentity,
 } from "./schema.js";
 import type { ScrapedPage } from "./anakin.js";
+import { coerceToSchema } from "./coerce.js";
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
@@ -30,33 +31,6 @@ function extractToolInput(msg: Anthropic.Message): unknown {
     if (block.type === "tool_use") return block.input;
   }
   throw new Error("Claude returned no tool_use block");
-}
-
-/**
- * Claude occasionally double-encodes nested array/object fields as JSON strings
- * inside a tool call instead of native JSON. Defensively parse any string field
- * that looks like JSON before schema validation.
- */
-function coerceStringifiedJson(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-  const out: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
-  for (const key of Object.keys(out)) {
-    const val = out[key];
-    if (typeof val === "string") {
-      const trimmed = val.trim();
-      const looksLikeJson =
-        (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
-        (trimmed.startsWith("{") && trimmed.endsWith("}"));
-      if (looksLikeJson) {
-        try {
-          out[key] = JSON.parse(trimmed);
-        } catch {
-          // leave as-is; schema validation will surface the mismatch
-        }
-      }
-    }
-  }
-  return out;
 }
 
 export async function identifyProduct(imageBase64: string): Promise<ProductIdentity> {
@@ -103,11 +77,12 @@ export async function identifyProduct(imageBase64: string): Promise<ProductIdent
     ],
   });
   const raw = extractToolInput(msg) as Record<string, unknown>;
-  return ProductIdentitySchema.parse({
+  const coerced = coerceToSchema(ProductIdentitySchema, {
     brand: null,
     model: null,
     ...raw,
   });
+  return ProductIdentitySchema.parse(coerced);
 }
 
 const REPORT_TOOL: Anthropic.Tool = {
@@ -123,10 +98,26 @@ const REPORT_TOOL: Anthropic.Tool = {
         description: "Overall buy confidence, an integer 0-100 (100 = perfect buy). Not out of 10 or 5.",
       },
       consensus: { type: "string" },
-      pros: { type: "array", items: { type: "string" } },
-      complaints: { type: "array", items: { type: "string" } },
-      longTermIssues: { type: "array", items: { type: "string" } },
-      commonFailures: { type: "array", items: { type: "string" } },
+      pros: {
+        type: "array",
+        items: { type: "string" },
+        description: "Always a JSON array of strings, even if there is only one item.",
+      },
+      complaints: {
+        type: "array",
+        items: { type: "string" },
+        description: "Always a JSON array of strings, even if there is only one item.",
+      },
+      longTermIssues: {
+        type: "array",
+        items: { type: "string" },
+        description: "Always a JSON array of strings, even if there is only one item.",
+      },
+      commonFailures: {
+        type: "array",
+        items: { type: "string" },
+        description: "Always a JSON array of strings, even if there is only one item.",
+      },
       fakeReviewSignal: {
         type: "object",
         properties: {
@@ -147,6 +138,7 @@ const REPORT_TOOL: Anthropic.Tool = {
       },
       alternatives: {
         type: "array",
+        description: "Always a JSON array of objects, even if there is only one alternative.",
         items: {
           type: "object",
           properties: { name: { type: "string" }, why: { type: "string" } },
@@ -156,6 +148,7 @@ const REPORT_TOOL: Anthropic.Tool = {
       buyingAdvice: { type: "string" },
       sources: {
         type: "array",
+        description: "Always a JSON array of objects, one per source actually used.",
         items: {
           type: "object",
           properties: {
@@ -209,6 +202,7 @@ export async function synthesizeReport(
     ],
   });
 
-  const raw = coerceStringifiedJson(extractToolInput(msg));
-  return ConsensusReportSchema.parse(raw);
+  const raw = extractToolInput(msg);
+  const coerced = coerceToSchema(ConsensusReportSchema, raw);
+  return ConsensusReportSchema.parse(coerced);
 }
