@@ -3,13 +3,14 @@ import type { z } from "zod";
 import { config } from "./config.js";
 import {
   ConsensusReportSchema,
-  ProductIdentitySchema,
+  IdentifyResultSchema,
   LongTermScoreSchema,
   VersionHistorySchema,
   ScamDetectorSchema,
   BestInCategorySchema,
   type ConsensusReport,
   type ProductIdentity,
+  type IdentifyResult,
   type LongTermScore,
   type VersionHistory,
   type ScamDetector,
@@ -53,26 +54,59 @@ async function callToolWithValidation<T>(
   let messages: Anthropic.MessageParam[] = [...initialMessages];
   let lastError = "";
 
+  // Every tool_use block in an assistant turn MUST get a matching tool_result in
+  // the very next message, or the next API call is rejected outright. If Claude
+  // ever emits more than one tool_use in a turn (parallel tool use), resolving
+  // only the "primary" one leaves the rest dangling - so always resolve all of them.
+  function rejectAllToolUses(
+    content: Anthropic.ContentBlock[],
+    primaryId: string,
+    primaryMessage: string
+  ): Anthropic.MessageParam {
+    const blocks = content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+    );
+    return {
+      role: "user",
+      content: blocks.map((b) => ({
+        type: "tool_result" as const,
+        tool_use_id: b.id,
+        is_error: true,
+        content:
+          b.id === primaryId
+            ? primaryMessage
+            : "Superseded by another tool call in the same turn - ignore this one.",
+      })),
+    };
+  }
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const msg = await client.messages.create({
       model: config.anthropicModel,
       max_tokens: opts.maxTokens,
       tools: [tool],
-      tool_choice: { type: "tool", name: tool.name },
+      tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true },
       system: opts.system,
       messages,
     });
 
     if (msg.stop_reason === "max_tokens") {
       lastError = "response was cut off before finishing (max_tokens)";
+      const hasToolUse = msg.content.some((b) => b.type === "tool_use");
       messages = [
         ...messages,
         { role: "assistant", content: msg.content },
-        {
-          role: "user",
-          content:
-            "Your previous response was cut off before it finished. Call the tool again, but keep every field noticeably shorter so the entire call fits within the token budget.",
-        },
+        hasToolUse
+          ? rejectAllToolUses(
+              msg.content,
+              "",
+              "Your previous response was cut off before it finished. Call the tool again, but keep every field noticeably shorter so the entire call fits within the token budget."
+            )
+          : {
+              role: "user",
+              content:
+                "Your previous response was cut off before it finished. Call the tool again, but keep every field noticeably shorter so the entire call fits within the token budget.",
+            },
       ];
       continue;
     }
@@ -106,17 +140,11 @@ async function callToolWithValidation<T>(
     messages = [
       ...messages,
       { role: "assistant", content: msg.content },
-      {
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: toolBlock.id,
-            is_error: true,
-            content: `Your call to ${tool.name} was rejected - these fields were missing or the wrong type:\n${lastError}\n\nCall ${tool.name} again with a complete, valid set of arguments. Do not omit any required field.`,
-          },
-        ],
-      },
+      rejectAllToolUses(
+        msg.content,
+        toolBlock.id,
+        `Your call to ${tool.name} was rejected - these fields were missing or the wrong type:\n${lastError}\n\nCall ${tool.name} again with a complete, valid set of arguments. Do not omit any required field.`
+      ),
     ];
   }
 
@@ -125,15 +153,37 @@ async function callToolWithValidation<T>(
   );
 }
 
-export async function identifyProduct(imageBase64: string): Promise<ProductIdentity> {
+export async function identifyProduct(imageBase64: string): Promise<IdentifyResult> {
   const { media, data } = parseImage(imageBase64);
   const tool: Anthropic.Tool = {
     name: "report_product",
-    description: "Report the single most prominent commercial product in the image.",
+    description:
+      "Report the single most prominent commercial product in the image, or reject if it is not a shoppable product.",
     input_schema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Specific product name" },
+        isProduct: {
+          type: "boolean",
+          description: "True only if the image clearly shows a shoppable commercial product",
+        },
+        rejectReason: {
+          type: ["string", "null"],
+          enum: [
+            "nudity",
+            "person",
+            "vehicle",
+            "animal",
+            "landscape",
+            "meme",
+            "document",
+            "screenshot",
+            "not_a_product",
+            "other",
+            null,
+          ],
+          description: "Set when isProduct is false; null when isProduct is true",
+        },
+        name: { type: "string", description: "Specific product name, or empty if not a product" },
         brand: { type: ["string", "null"] },
         category: { type: "string", description: "e.g. smartphone, running shoe, book" },
         model: { type: ["string", "null"] },
@@ -143,12 +193,12 @@ export async function identifyProduct(imageBase64: string): Promise<ProductIdent
           description: "Best query string to research this product online",
         },
       },
-      required: ["name", "category", "confidence", "searchTerm"],
+      required: ["isProduct", "rejectReason", "name", "category", "confidence", "searchTerm"],
     },
   };
 
   return callToolWithValidation(
-    ProductIdentitySchema,
+    IdentifyResultSchema,
     tool,
     [
       {
@@ -157,7 +207,12 @@ export async function identifyProduct(imageBase64: string): Promise<ProductIdent
           { type: "image", source: { type: "base64", media_type: media, data } },
           {
             type: "text",
-            text: "Identify the main product in this photo so it can be researched for a buying decision.",
+            text: [
+              "Identify the main shoppable product in this photo for a buying-decision research app.",
+              "Reject (isProduct=false) if the image is nudity, a person without a clear product,",
+              "a vehicle, animal, landscape, meme, document, non-shopping screenshot, or otherwise not a product.",
+              "Only set isProduct=true for clear commercial products a shopper would buy.",
+            ].join(" "),
           },
         ],
       },
@@ -165,7 +220,13 @@ export async function identifyProduct(imageBase64: string): Promise<ProductIdent
     {
       maxTokens: 512,
       maxAttempts: 2,
-      normalize: (raw) => ({ brand: null, model: null, ...(raw as Record<string, unknown>) }),
+      normalize: (raw) => ({
+        brand: null,
+        model: null,
+        rejectReason: null,
+        isProduct: true,
+        ...(raw as Record<string, unknown>),
+      }),
     }
   );
 }
@@ -177,38 +238,45 @@ const REPORT_TOOL: Anthropic.Tool = {
     type: "object",
     properties: {
       verdict: { type: "string", enum: ["buy", "wait", "avoid", "mixed"] },
-      verdictLine: { type: "string" },
+      verdictLine: { type: "string", description: "One short punchy sentence, max ~16 words. No fluff." },
       score: {
         type: "integer",
         description: "Overall buy confidence, an integer 0-100 (100 = perfect buy). Not out of 10 or 5.",
       },
-      consensus: { type: "string" },
+      consensus: {
+        type: "string",
+        description: "Max 2 short sentences summarizing what the internet collectively thinks. No filler.",
+      },
       pros: {
         type: "array",
         items: { type: "string" },
-        description: "Always a JSON array of strings, even if there is only one item.",
+        description:
+          "Always a JSON array of strings, even if there is only one item. Max 4 items, each a short phrase (under 12 words), not a full paragraph.",
       },
       complaints: {
         type: "array",
         items: { type: "string" },
-        description: "Always a JSON array of strings, even if there is only one item.",
+        description:
+          "Always a JSON array of strings, even if there is only one item. Max 4 items, each a short phrase (under 12 words), not a full paragraph.",
       },
       longTermIssues: {
         type: "array",
         items: { type: "string" },
-        description: "Always a JSON array of strings, even if there is only one item.",
+        description:
+          "Always a JSON array of strings, even if there is only one item. Max 4 items, each one short sentence.",
       },
       commonFailures: {
         type: "array",
         items: { type: "string" },
-        description: "Always a JSON array of strings, even if there is only one item.",
+        description:
+          "Always a JSON array of strings, even if there is only one item. Max 4 items, each one short sentence.",
       },
       fakeReviewSignal: {
         type: "object",
         description: "Required object - never omit this field.",
         properties: {
           level: { type: "string", enum: ["low", "medium", "high", "unknown"] },
-          note: { type: "string" },
+          note: { type: "string", description: "One short sentence, max ~20 words." },
         },
         required: ["level", "note"],
       },
@@ -216,23 +284,27 @@ const REPORT_TOOL: Anthropic.Tool = {
         type: "object",
         description: "Required object - never omit this field.",
         properties: {
-          summary: { type: "string" },
+          summary: { type: "string", description: "One short sentence, max ~16 words." },
           trend: { type: "string", enum: ["rising", "falling", "stable", "unknown"] },
           shouldWaitForSale: { type: "boolean" },
-          reason: { type: "string" },
+          reason: { type: "string", description: "One short sentence, max ~20 words." },
         },
         required: ["summary", "trend", "shouldWaitForSale", "reason"],
       },
       alternatives: {
         type: "array",
-        description: "Always a JSON array of objects, even if there is only one alternative.",
+        description:
+          "Always a JSON array of objects, even if there is only one alternative. Max 3 items; keep 'why' to one short phrase.",
         items: {
           type: "object",
           properties: { name: { type: "string" }, why: { type: "string" } },
           required: ["name", "why"],
         },
       },
-      buyingAdvice: { type: "string", description: "Required - never omit this field." },
+      buyingAdvice: {
+        type: "string",
+        description: "Required - never omit. Max 2-3 short sentences, directly answering 'should I buy this'.",
+      },
       sources: {
         type: "array",
         description: "Always a JSON array of objects, one per source actually used.",
@@ -287,7 +359,7 @@ export async function synthesizeReport(
       maxTokens: 4096,
       maxAttempts: 3,
       system:
-        "You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Keep each list item to one concise sentence and be economical with tokens. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.",
+        "You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.",
     }
   );
 }

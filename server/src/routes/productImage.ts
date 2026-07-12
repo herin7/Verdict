@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { findProductImage } from "../productImage.js";
+import { requireAuth } from "../auth/plugin.js";
 
 const BodySchema = z.object({
   product: z.object({
@@ -10,9 +11,8 @@ const BodySchema = z.object({
   }),
 });
 
-/** Best-effort real product photo lookup - always resolves (null on miss), never blocks the confirm screen. */
 export async function productImageRoute(app: FastifyInstance) {
-  app.post("/product-image", async (req, reply) => {
+  app.post("/product-image", { preHandler: requireAuth }, async (req, reply) => {
     const parsed = BodySchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "product is required" });

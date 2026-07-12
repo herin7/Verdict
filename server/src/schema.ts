@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+export const RejectReasonSchema = z.enum([
+  "nudity",
+  "person",
+  "vehicle",
+  "animal",
+  "landscape",
+  "meme",
+  "document",
+  "screenshot",
+  "not_a_product",
+  "other",
+]);
+export type RejectReason = z.infer<typeof RejectReasonSchema>;
+
 export const ProductIdentitySchema = z.object({
   name: z.string(),
   brand: z.string().nullable(),
@@ -9,6 +23,13 @@ export const ProductIdentitySchema = z.object({
   searchTerm: z.string(),
 });
 export type ProductIdentity = z.infer<typeof ProductIdentitySchema>;
+
+/** Vision identify output - includes safety gate fields. */
+export const IdentifyResultSchema = ProductIdentitySchema.extend({
+  isProduct: z.boolean(),
+  rejectReason: RejectReasonSchema.nullable(),
+});
+export type IdentifyResult = z.infer<typeof IdentifyResultSchema>;
 
 export const ReportSourceSchema = z.object({
   title: z.string(),

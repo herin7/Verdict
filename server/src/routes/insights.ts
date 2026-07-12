@@ -2,14 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ProductIdentitySchema } from "../schema.js";
 import { AnakinCreditError } from "../anakin.js";
-import {
-  getLongTermScore,
-  getVersionHistory,
-  getScamDetector,
-  getBestInCategory,
-  type InsightType,
-} from "../insights.js";
-import type { ProductIdentity } from "../schema.js";
+import { fetchInsight } from "../services/insights.js";
+import { requireAuth } from "../auth/plugin.js";
+import type { InsightType } from "../insights.js";
 
 const InsightTypeSchema = z.enum(["long-term", "version-history", "scam-detector", "best-in-category"]);
 
@@ -23,16 +18,8 @@ const BodySchema = z.object({
   }),
 });
 
-const HANDLERS: Record<InsightType, (product: ProductIdentity) => Promise<unknown>> = {
-  "long-term": getLongTermScore,
-  "version-history": getVersionHistory,
-  "scam-detector": getScamDetector,
-  "best-in-category": getBestInCategory,
-};
-
-/** Lazily-fetched deep-dive insights - independent of the main report so a slow/failed one never blocks it. */
 export async function insightsRoute(app: FastifyInstance) {
-  app.post("/insights", async (req, reply) => {
+  app.post("/insights", { preHandler: requireAuth }, async (req, reply) => {
     const parsed = BodySchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "type and product are required" });
@@ -47,7 +34,7 @@ export async function insightsRoute(app: FastifyInstance) {
     };
 
     try {
-      const insight = await HANDLERS[type](product);
+      const insight = await fetchInsight(type as InsightType, product);
       return { type, insight };
     } catch (err) {
       req.log.error(err);

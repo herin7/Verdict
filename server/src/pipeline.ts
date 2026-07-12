@@ -60,10 +60,11 @@ export async function runResearch(product: ProductIdentity): Promise<ResearchRes
   // citation, never a blank source.
   const pages: ScrapedPage[] = picked.map((p) => byUrl.get(p.url) ?? { url: p.url, markdown: p.title });
 
-  // Free (already-fetched) real citations filtered to known retail domains - no
-  // extra Anakin/Firecrawl calls, never invented by the LLM.
-  const buyLinks = extractBuyLinks(grouped);
+  // Real citations filtered to known retail domains - price comes free from the
+  // snippet when mentioned, else a small bounded scrape (never invented by the LLM).
+  const buyLinksPromise = extractBuyLinks(grouped);
 
   const report = await synthesizeReport(product, pages);
+  const buyLinks = await buyLinksPromise;
   return { report, buyLinks };
 }

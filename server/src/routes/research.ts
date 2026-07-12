@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { ProductIdentitySchema } from "../schema.js";
-import { runResearch } from "../pipeline.js";
+import { researchProduct } from "../services/research.js";
 import { AnakinCreditError } from "../anakin.js";
+import { requireAuth } from "../auth/plugin.js";
 
 export async function researchRoute(app: FastifyInstance) {
-  app.post("/research", async (req, reply) => {
+  app.post("/research", { preHandler: requireAuth }, async (req, reply) => {
     const parsed = ProductIdentitySchema.partial({
       brand: true,
       model: true,
@@ -22,8 +23,13 @@ export async function researchRoute(app: FastifyInstance) {
       ...parsed.data,
     };
     try {
-      const { report, buyLinks } = await runResearch(product);
-      return { report, buyLinks };
+      const result = await researchProduct(product, { userId: req.user?.id });
+      return {
+        report: result.report,
+        buyLinks: result.buyLinks,
+        productId: result.productId ?? null,
+        cached: result.cached,
+      };
     } catch (err) {
       req.log.error(err);
       if (err instanceof AnakinCreditError) {
