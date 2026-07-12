@@ -19,11 +19,13 @@ Every scan runs 8 parallel Anakin `Search` calls (one per source type) then an A
 
 ## Structure
 
-- `server/` - Fastify + TypeScript backend. Holds the API keys, orchestrates the pipeline. Endpoints: `POST /identify`, `POST /research`, `GET /health`.
-  - `src/anakin.ts` - Anakin client: `search()` (sync), `scrapeBatch()` (async submit + poll), `scrape()` (inline single URL).
-  - `src/claude.ts` - Claude vision `identifyProduct()` and structured `synthesizeReport()`.
-  - `src/pipeline.ts` - orchestrates query generation -> Anakin search -> ranking -> Anakin scrape -> Claude synthesis.
-- `app/` - Expo (React Native, TS) app. `ScanScreen` (camera + identify + confirm) and `ReportScreen`.
+- `server/` - Fastify + TypeScript backend. Holds the API keys, orchestrates the pipeline.
+  - Endpoints: `POST /identify`, `POST /identify-url`, `POST /research`, `POST /compare`, `POST /deals`, `GET/PUT /me/*`, `GET /health`
+  - Anakin-first provider orchestrator with Firecrawl gap-fill
+  - Compare Everywhere + Personalized Deal Engine (deterministic, no LLM)
+  - Pre-flight validation + abuse prevention (IP ban after repeated invalids)
+- `app/` - Expo (React Native, TS) app with camera scan, paste-link, payment profile, compare/deals UI
+  - Android floating overlay (custom native module) + share-intent (requires EAS/dev-client build)
 
 ## Run
 
@@ -34,9 +36,10 @@ cd server
 cp .env.example .env   # fill ANAKIN_API_KEY and ANTHROPIC_API_KEY
 npm install
 npm run dev
+# optional: apply drizzle/0001_guardrails_compare_deals.sql on Neon
 ```
 
-App:
+App (Expo Go - camera + paste link + deals UI):
 
 ```bash
 cd app
@@ -44,7 +47,24 @@ npm install
 npm start
 ```
 
+App (Android floating overlay / share-target - needs custom dev client):
+
+```bash
+cd app
+npx expo prebuild --platform android
+npx expo run:android
+# or: eas build --profile development --platform android
+```
+
 On a physical device set `EXPO_PUBLIC_API_URL` to your machine's LAN IP, e.g. `EXPO_PUBLIC_API_URL=http://192.168.1.50:8787`. The Android emulator uses `10.0.2.2` automatically.
+
+### Overlay detection priority (Android)
+
+1. Share Intent from shopping app (zero extra permission)
+2. Bubble tap -> one-shot MediaProjection screenshot -> Claude vision identify
+3. Optional AccessibilityService text read (off by default, explicit disclosure)
+
+iOS floating overlay is not supported by Apple; deferred.
 
 ## Credit cost per scan
 
