@@ -1,5 +1,13 @@
-import { search, scrapeBatch, AnakinCreditError, type SearchResult, type ScrapedPage } from "./anakin.js";
-import { firecrawlEnabled, firecrawlSearch, firecrawlScrape } from "./firecrawl.js";
+import type { SearchResult, ScrapedPage } from "./anakin.js";
+import {
+  CreditTracker,
+  orchestratedSearch,
+  orchestratedSearchMany,
+  orchestratedScrape,
+} from "./providers/orchestrator.js";
+
+export { CreditTracker };
+export type { SearchResult, ScrapedPage };
 
 export interface SourceQuery {
   type: string;
@@ -23,82 +31,40 @@ export function hostname(url: string): string {
   }
 }
 
-/** Remembers the last Anakin credit error seen across a batch of fallback-aware calls. */
-export class CreditTracker {
-  error: AnakinCreditError | null = null;
-  note(err: unknown) {
-    if (err instanceof AnakinCreditError) this.error = err;
-  }
-}
-
-/** Anakin search first, Firecrawl fallback on failure or empty result - same precedence everywhere. */
+/** Anakin-first search via orchestrator; Firecrawl fills gaps only. */
 export async function searchWithFallback(
   q: SourceQuery,
   tracker: CreditTracker,
   limit = 5,
   timeoutMs = 12000
 ): Promise<SearchResult[]> {
-  async function run(): Promise<SearchResult[]> {
-    try {
-      const anakin = await search(q.prompt, limit);
-      if (anakin.length > 0) return anakin;
-    } catch (err) {
-      tracker.note(err);
-      if (!(err instanceof AnakinCreditError)) {
-        console.warn(`[research] anakin search "${q.type}" failed: ${(err as Error).message}`);
-      }
-    }
-    if (firecrawlEnabled()) {
-      try {
-        return await firecrawlSearch(q.prompt, limit);
-      } catch (err) {
-        console.warn(`[research] firecrawl search "${q.type}" failed: ${(err as Error).message}`);
-      }
-    }
-    return [];
-  }
-  return withTimeout(run(), timeoutMs, [] as SearchResult[]);
+  const out = await orchestratedSearch(
+    { type: q.type, prompt: q.prompt, minResults: 1 },
+    tracker,
+    { limit, timeoutMs }
+  );
+  return out.results;
 }
 
-/** Runs all queries in parallel; one failing query never discards the others' credits/results. */
 export async function searchMany(
   queries: SourceQuery[],
   tracker: CreditTracker,
   opts: { limit?: number; timeoutMs?: number } = {}
 ): Promise<GroupedResults[]> {
-  return Promise.all(
-    queries.map(async (q) => ({
-      type: q.type,
-      results: await searchWithFallback(q, tracker, opts.limit ?? 5, opts.timeoutMs ?? 12000),
-    }))
+  const results = await orchestratedSearchMany(
+    queries.map((q) => ({ type: q.type, prompt: q.prompt })),
+    tracker,
+    opts
   );
+  return results.map((r) => ({ type: r.type, results: r.results }));
 }
 
-/** Anakin batch scrape first, Firecrawl fills whatever Anakin missed. */
 export async function scrapeWithFallback(
   urls: string[],
   tracker: CreditTracker,
   opts: { batchTimeoutMs?: number; oneTimeoutMs?: number } = {}
 ): Promise<Map<string, ScrapedPage>> {
-  const scraped = await scrapeBatch(urls, { timeoutMs: opts.batchTimeoutMs ?? 22000 }).catch((err) => {
-    tracker.note(err);
-    if (!(err instanceof AnakinCreditError)) {
-      console.warn(`[research] anakin batch scrape failed: ${(err as Error).message}`);
-    }
-    return [] as ScrapedPage[];
-  });
-
-  const byUrl = new Map(scraped.map((p) => [p.url, p]));
-  const missing = urls.filter((u) => !byUrl.has(u));
-  if (missing.length > 0 && firecrawlEnabled()) {
-    const filled = await Promise.allSettled(
-      missing.map((u) => withTimeout(firecrawlScrape(u), opts.oneTimeoutMs ?? 12000, null))
-    );
-    filled.forEach((res, i) => {
-      if (res.status === "fulfilled" && res.value) byUrl.set(missing[i], res.value);
-    });
-  }
-  return byUrl;
+  return orchestratedScrape(urls, tracker, opts);
 }
 
 /** Rank + dedupe citations across query groups: prefer source-type diversity, cap total. */
@@ -131,12 +97,17 @@ export function selectUrls(
   return picked;
 }
 
-/** Search + scrape a lean set of queries down to grounded pages, fallback-aware end to end. */
+/** Search + scrape a lean set of queries down to grounded pages, orchestrator-backed. */
 export async function gatherPages(
   term: string,
   queries: SourceQuery[],
   tracker: CreditTracker,
-  opts: { maxUrls?: number; searchTimeoutMs?: number; scrapeTimeoutMs?: number; scrapeOneTimeoutMs?: number } = {}
+  opts: {
+    maxUrls?: number;
+    searchTimeoutMs?: number;
+    scrapeTimeoutMs?: number;
+    scrapeOneTimeoutMs?: number;
+  } = {}
 ): Promise<ScrapedPage[]> {
   const grouped = await searchMany(queries, tracker, {
     limit: 5,
@@ -152,7 +123,10 @@ export async function gatherPages(
   const byUrl = await scrapeWithFallback(
     picked.map((p) => p.url),
     tracker,
-    { batchTimeoutMs: opts.scrapeTimeoutMs ?? 15000, oneTimeoutMs: opts.scrapeOneTimeoutMs ?? 10000 }
+    {
+      batchTimeoutMs: opts.scrapeTimeoutMs ?? 15000,
+      oneTimeoutMs: opts.scrapeOneTimeoutMs ?? 10000,
+    }
   );
 
   return picked.map((p) => byUrl.get(p.url) ?? { url: p.url, markdown: p.title });

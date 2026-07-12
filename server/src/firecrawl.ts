@@ -62,3 +62,59 @@ export async function firecrawlOgImage(url: string): Promise<string | null> {
   const image = meta?.ogImage ?? meta?.["og:image"] ?? null;
   return typeof image === "string" && image.trim() ? image : null;
 }
+
+/** Raw HTML fallback for meta tags Firecrawl doesn't normalize (e.g. product:price:amount). */
+export async function firecrawlScrapeHtml(url: string): Promise<string | null> {
+  const json = await fcRequest("/scrape", { url, formats: ["html"], onlyMainContent: false });
+  const html: unknown = json?.data?.html;
+  return typeof html === "string" && html.trim() ? html : null;
+}
+
+const PRODUCT_EXTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    brand: { type: "string" },
+    model: { type: "string" },
+    price: { type: "string" },
+    currency: { type: "string" },
+    gtin: { type: "string" },
+    upc: { type: "string" },
+    ean: { type: "string" },
+    seller: { type: "string" },
+    inStock: { type: "boolean" },
+    imageUrl: { type: "string" },
+    description: { type: "string" },
+  },
+};
+
+/** Schema-based structured extract - used when markdown scrape lacks price/specs. */
+export async function firecrawlExtract(url: string): Promise<{
+  title?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  price?: string | null;
+  currency?: string | null;
+  gtin?: string | null;
+  upc?: string | null;
+  ean?: string | null;
+  seller?: string | null;
+  inStock?: boolean | null;
+  imageUrl?: string | null;
+  description?: string | null;
+} | null> {
+  const json = await fcRequest("/scrape", {
+    url,
+    formats: [
+      {
+        type: "json",
+        schema: PRODUCT_EXTRACT_SCHEMA,
+        prompt: "Extract product title, brand, model, price, currency, GTIN/UPC/EAN, seller, stock, image URL.",
+      },
+    ],
+    onlyMainContent: true,
+  });
+  const data = json?.data?.json ?? json?.data?.extract ?? null;
+  if (!data || typeof data !== "object") return null;
+  return data;
+}
