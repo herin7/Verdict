@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Badge } from "./Badge";
+import { Timeline3D } from "./Timeline3D";
 import { colors, fonts } from "../theme";
 import type { BestInCategory, LongTermScore, ScamDetector, VersionHistory } from "../types";
 
@@ -13,8 +14,6 @@ const verdictIconMap = {
 };
 const riskColor = { low: colors.buy, medium: colors.wait, high: colors.avoid } as const;
 
-// A competitor being "better" than our product is bad news for the verdict, and
-// vice versa - so the icon/color is inverted relative to the raw comparison value.
 const competitorIconMap = {
   better: "arrow-down-circle" as const,
   worse: "arrow-up-circle" as const,
@@ -26,8 +25,6 @@ export function LongTermContent({ data }: { data: LongTermScore }) {
   return (
     <View style={{ gap: 12 }}>
       <View style={styles.statRow}>
-        <Text style={styles.bigStat}>{data.score}</Text>
-        <Text style={styles.bigStatUnit}>/100</Text>
         <Badge
           label={data.trend}
           color={data.trend === "improving" ? colors.buy : data.trend === "declining" ? colors.avoid : colors.accent}
@@ -35,17 +32,7 @@ export function LongTermContent({ data }: { data: LongTermScore }) {
         />
       </View>
 
-      <View style={{ gap: 8 }}>
-        {data.timeline.map((t, i) => (
-          <View key={i} style={styles.timelineRow}>
-            <View style={[styles.timelineDot, { backgroundColor: sentimentColor[t.sentiment] }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.timelinePeriod}>{t.period}</Text>
-              <Text style={styles.timelineNote}>{t.note}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
+      <Timeline3D points={data.timeline} score={data.score} />
 
       <Text style={styles.summary}>{data.summary}</Text>
     </View>

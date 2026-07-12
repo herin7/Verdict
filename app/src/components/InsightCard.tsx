@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LayoutAnimation, Platform, StyleSheet, Text, UIManager, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassCard } from "./GlassCard";
@@ -32,12 +32,19 @@ export function InsightCard<T>({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [state, setState] = useState<CardState<T>>({ status: "idle" });
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   function load() {
     setState({ status: "loading" });
     fetcher()
-      .then((data) => setState({ status: "loaded", data }))
-      .catch(() => setState({ status: "error" }));
+      .then((data) => mounted.current && setState({ status: "loaded", data }))
+      .catch(() => mounted.current && setState({ status: "error" }));
   }
 
   function toggle() {

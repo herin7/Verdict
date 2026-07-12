@@ -1,6 +1,10 @@
+import { useEffect } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import Svg, { Circle } from "react-native-svg";
-import { colors, fonts } from "../theme";
+import Animated, { useAnimatedProps, useSharedValue, withTiming, Easing } from "react-native-reanimated";
+import { colors, fonts, motion } from "../theme";
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export function ScoreGauge({
   score,
@@ -15,8 +19,18 @@ export function ScoreGauge({
 }) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = Math.max(0, Math.min(100, score)) / 100;
-  const dashOffset = circumference * (1 - progress);
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withTiming(Math.max(0, Math.min(100, score)) / 100, {
+      duration: motion.slow,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [score]);
+
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: circumference * (1 - progress.value),
+  }));
 
   return (
     <View style={{ width: size, height: size }}>
@@ -29,7 +43,7 @@ export function ScoreGauge({
           strokeWidth={stroke}
           fill="none"
         />
-        <Circle
+        <AnimatedCircle
           cx={size / 2}
           cy={size / 2}
           r={radius}
@@ -38,7 +52,7 @@ export function ScoreGauge({
           fill="none"
           strokeLinecap="round"
           strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={dashOffset}
+          animatedProps={animatedProps}
           rotation={-90}
           origin={`${size / 2}, ${size / 2}`}
         />

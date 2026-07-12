@@ -7,12 +7,10 @@ export const colors = {
   textMuted: "#b8b2a3",
   textFaint: "#6e6656",
 
-  // Brand: everything chrome (buttons, CTAs, active states, gauges) uses gold.
   accent: "#FFD76D",
   accentSoft: "rgba(255,215,109,0.14)",
-  onAccent: "#171106", // text/icon color placed on top of solid gold
+  onAccent: "#171106",
 
-  // Verdict semantics kept distinct from the brand color for at-a-glance meaning.
   buy: "#34d399",
   wait: "#FFD76D",
   avoid: "#fb7185",
@@ -42,15 +40,30 @@ export const verdictLabel: Record<"buy" | "wait" | "avoid" | "mixed", string> = 
 
 export const goldGradient: [string, string] = ["#FFE49A", "#FFC94D"];
 
-export const radius = { sm: 10, md: 16, lg: 22, pill: 999 };
+export const radius = { sm: 10, md: 16, lg: 22, xl: 28, pill: 999 };
 
-export const spacing = (n: number) => n * 4;
+/** 4pt spacing scale: space(4) = 16 */
+export const space = (n: number) => n * 4;
 
-/**
- * Type system: Instrument Serif for display/editorial moments, Arimo (metric-
- * compatible with Helvetica/Arial) for UI chrome and body copy, JetBrains Mono
- * for numeric/data readouts (score, stats, prices).
- */
+export const spacing = space;
+
+export const elevation = {
+  soft: {
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+};
+
+export const motion = {
+  fast: 180,
+  normal: 320,
+  slow: 520,
+  spring: { damping: 16, stiffness: 180, mass: 0.8 },
+};
+
 export const fonts = {
   serif: "InstrumentSerif_400Regular",
   serifItalic: "InstrumentSerif_400Regular_Italic",
@@ -63,9 +76,11 @@ export const fonts = {
 };
 
 export const font = {
+  display: { fontFamily: fonts.serif, fontSize: 40, letterSpacing: 0.2, lineHeight: 44 },
   h1: { fontFamily: fonts.serif, fontSize: 32, letterSpacing: 0.2 },
   h2: { fontFamily: fonts.sansSemiBold, fontSize: 17, letterSpacing: -0.2 },
   body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 22 },
   small: { fontFamily: fonts.sansSemiBold, fontSize: 12.5 },
   label: { fontFamily: fonts.sansBold, fontSize: 11.5, letterSpacing: 0.8 },
+  mono: { fontFamily: fonts.monoBold, fontSize: 14 },
 };

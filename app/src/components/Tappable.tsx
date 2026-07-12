@@ -1,5 +1,6 @@
-import { useRef } from "react";
-import { Animated, Pressable, type GestureResponderEvent, type StyleProp, type ViewStyle } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { Pressable, type GestureResponderEvent, type StyleProp, type ViewStyle } from "react-native";
+import { motion } from "../theme";
 
 export function Tappable({
   children,
@@ -12,22 +13,24 @@ export function Tappable({
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
 }) {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  function animateTo(v: number) {
-    Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
-  }
+  const scale = useSharedValue(1);
+  const anim = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: disabled ? 0.5 : 1,
+  }));
 
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      onPressIn={() => animateTo(0.96)}
-      onPressOut={() => animateTo(1)}
+      onPressIn={() => {
+        scale.value = withSpring(0.96, motion.spring);
+      }}
+      onPressOut={() => {
+        scale.value = withSpring(1, motion.spring);
+      }}
     >
-      <Animated.View style={[style, { transform: [{ scale }] }, disabled && { opacity: 0.5 }]}>
-        {children}
-      </Animated.View>
+      <Animated.View style={[style, anim]}>{children}</Animated.View>
     </Pressable>
   );
 }

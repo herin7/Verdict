@@ -3,6 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ProductThumb, type ThumbStatus } from "./ProductThumb";
 import { FadeIn } from "./FadeIn";
+import { SkiaLoader } from "./SkiaLoader";
 import { colors, fonts, radius } from "../theme";
 import type { ProductIdentity } from "../types";
 
@@ -94,6 +95,10 @@ export function ResearchingScreen({
               <Text style={styles.msg}>{MESSAGES[msgIndex]}</Text>
             </View>
           </FadeIn>
+        </View>
+
+        <View style={{ marginVertical: 10 }}>
+          <SkiaLoader size={36} />
         </View>
 
         <View style={styles.track} onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}>
