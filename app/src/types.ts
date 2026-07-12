@@ -17,6 +17,7 @@ export interface BuyLink {
   retailer: string;
   url: string;
   title: string;
+  price: string | null;
 }
 
 export interface ConsensusReport {
@@ -46,6 +47,7 @@ export interface SavedReport {
   product: ProductIdentity;
   report: ConsensusReport;
   buyLinks: BuyLink[];
+  productId?: string | null;
 }
 
 // --- Deep-dive insights (fetched lazily, one endpoint call per card) -------
@@ -80,4 +82,58 @@ export interface BestInCategory {
   categoryScore: number;
   competitors: { name: string; comparison: "better" | "worse" | "similar"; note: string }[];
   summary: string;
+}
+
+export interface MarketplaceOffer {
+  retailer: string;
+  retailerId: string;
+  url: string;
+  title: string;
+  price: number | null;
+  currency: string;
+  priceRaw: string | null;
+  shipping: string | null;
+  deliveryEstimate: string | null;
+  inStock: boolean | null;
+  seller: string | null;
+  coupons: string[];
+  matchScore: number;
+  matchReason: string;
+}
+
+export type PaymentMethodId =
+  | "hdfc_cc"
+  | "sbi_cc"
+  | "icici_cc"
+  | "axis_cc"
+  | "amex"
+  | "amazon_pay"
+  | "flipkart_axis"
+  | "gpay"
+  | "phonepe"
+  | "paytm"
+  | "cred"
+  | "amazon_prime"
+  | "flipkart_plus";
+
+export interface PaymentCatalogItem {
+  id: PaymentMethodId;
+  label: string;
+  kind: "card" | "wallet" | "membership";
+}
+
+export interface AppliedDeal {
+  ruleId: string;
+  label: string;
+  method: PaymentMethodId;
+  savings: number;
+}
+
+export interface RankedDeal {
+  offer: MarketplaceOffer;
+  listPrice: number;
+  finalPayable: number;
+  totalSavings: number;
+  applied: AppliedDeal[];
+  methodUsed: PaymentMethodId | null;
 }

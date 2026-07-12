@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { ActivityIndicator, LayoutAnimation, Platform, StyleSheet, Text, UIManager, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, LayoutAnimation, Platform, StyleSheet, Text, TextInput, UIManager, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
@@ -10,21 +10,25 @@ import { FadeIn } from "../components/FadeIn";
 import { ScannerFrame } from "../components/ScannerFrame";
 import { ResearchingScreen } from "../components/ResearchingScreen";
 import { colors, fonts, goldGradient, radius } from "../theme";
-import { getProductImage, identify, research } from "../api/client";
+import { getProductImage, identify, identifyUrl, research } from "../api/client";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-type Stage = "idle" | "identifying" | "confirm" | "researching";
+type Stage = "idle" | "identifying" | "identifyFailed" | "confirm" | "researching" | "paste";
 
 export function ScanScreen({
   onReport,
   onHome,
+  initialUrl,
+  initialImageBase64,
 }: {
-  onReport: (r: ConsensusReport, p: ProductIdentity, buyLinks: BuyLink[]) => void;
+  onReport: (r: ConsensusReport, p: ProductIdentity, buyLinks: BuyLink[], productId?: string | null) => void;
   onHome: () => void;
+  initialUrl?: string | null;
+  initialImageBase64?: string | null;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
@@ -32,10 +36,73 @@ export function ScanScreen({
   const [product, setProduct] = useState<ProductIdentity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
   const [thumbStatus, setThumbStatus] = useState<ThumbStatus>("loading");
   const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
+  const [pasteUrl, setPasteUrl] = useState(initialUrl ?? "");
+  const imageRequestId = useRef(0);
 
-  if (!permission) {
+  useEffect(() => {
+    return () => {
+      // Invalidate any in-flight image lookup when the screen unmounts.
+      imageRequestId.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialImageBase64?.trim()) {
+      setCapturedBase64(initialImageBase64);
+      setError(null);
+      setStage("identifying");
+      void (async () => {
+        try {
+          const p = await identify(initialImageBase64);
+          setProduct(p);
+          setStage("confirm");
+          setThumbStatus("loading");
+          setProductImageUrl(null);
+          const requestId = ++imageRequestId.current;
+          getProductImage(p).then((url) => {
+            if (imageRequestId.current !== requestId) return;
+            setProductImageUrl(url);
+            setThumbStatus(url ? "loaded" : "empty");
+          });
+        } catch (e) {
+          setError((e as Error).message);
+          setStage("identifyFailed");
+        }
+      })();
+    }
+  }, [initialImageBase64]);
+
+  useEffect(() => {
+    if (initialUrl?.trim()) {
+      setPasteUrl(initialUrl);
+      setStage("paste");
+      void (async () => {
+        setError(null);
+        setStage("identifying");
+        try {
+          const { product: p } = await identifyUrl(initialUrl.trim());
+          setProduct(p);
+          setStage("confirm");
+          setThumbStatus("loading");
+          setProductImageUrl(null);
+          const requestId = ++imageRequestId.current;
+          getProductImage(p).then((u) => {
+            if (imageRequestId.current !== requestId) return;
+            setProductImageUrl(u);
+            setThumbStatus(u ? "loaded" : "empty");
+          });
+        } catch (e) {
+          setError((e as Error).message);
+          setStage("paste");
+        }
+      })();
+    }
+  }, [initialUrl]);
+
+  if (!permission && stage !== "paste" && stage !== "identifying" && stage !== "confirm") {
     return (
       <Center>
         <ActivityIndicator color={colors.accent} />
@@ -43,7 +110,7 @@ export function ScanScreen({
     );
   }
 
-  if (!permission.granted) {
+  if (permission && !permission.granted && stage !== "paste" && stage !== "identifying" && stage !== "confirm" && stage !== "researching") {
     return (
       <Center>
         <Ionicons name="camera-outline" size={40} color={colors.textMuted} />
@@ -58,6 +125,9 @@ export function ScanScreen({
             <Text style={styles.primaryBtnText}>Grant permission</Text>
           </LinearGradient>
         </Tappable>
+        <Tappable onPress={() => setStage("paste")} style={styles.linkBtn}>
+          <Text style={styles.linkBtnText}>Or paste a product link</Text>
+        </Tappable>
       </Center>
     );
   }
@@ -69,24 +139,66 @@ export function ScanScreen({
 
   async function capture() {
     setError(null);
+    // React the instant the shutter is tapped - don't wait on takePictureAsync to resolve.
+    goTo("identifying");
+    let base64: string | null = null;
     try {
       const photo = await cameraRef.current?.takePictureAsync({ base64: true, quality: 0.6 });
       if (!photo?.base64) throw new Error("Could not capture image");
+      base64 = photo.base64;
       setCapturedUri(photo.uri ?? null);
-      goTo("identifying");
-      const p = await identify(photo.base64);
+      setCapturedBase64(photo.base64);
+    } catch (e) {
+      setError((e as Error).message);
+      goTo("idle");
+      return;
+    }
+    await runIdentify(base64);
+  }
+
+  async function runIdentify(base64: string) {
+    setError(null);
+    goTo("identifying");
+    try {
+      const p = await identify(base64);
       setProduct(p);
       goTo("confirm");
 
       setThumbStatus("loading");
       setProductImageUrl(null);
+      const requestId = ++imageRequestId.current;
       getProductImage(p).then((url) => {
+        // Ignore stale responses from a retake/re-identify that happened while this was in flight.
+        if (imageRequestId.current !== requestId) return;
         setProductImageUrl(url);
         setThumbStatus(url ? "loaded" : "empty");
       });
     } catch (e) {
       setError((e as Error).message);
-      goTo("idle");
+      goTo("identifyFailed");
+    }
+  }
+
+  async function runIdentifyUrl(url: string) {
+    setError(null);
+    goTo("identifying");
+    try {
+      const { product: p } = await identifyUrl(url.trim());
+      setProduct(p);
+      setCapturedUri(null);
+      setCapturedBase64(null);
+      goTo("confirm");
+      setThumbStatus("loading");
+      setProductImageUrl(null);
+      const requestId = ++imageRequestId.current;
+      getProductImage(p).then((u) => {
+        if (imageRequestId.current !== requestId) return;
+        setProductImageUrl(u);
+        setThumbStatus(u ? "loaded" : "empty");
+      });
+    } catch (e) {
+      setError((e as Error).message);
+      goTo("paste");
     }
   }
 
@@ -95,23 +207,38 @@ export function ScanScreen({
     goTo("researching");
     setError(null);
     try {
-      const { report, buyLinks } = await research(product);
-      onReport(report, product, buyLinks);
+      const { report, buyLinks, productId } = await research(product);
+      onReport(report, product, buyLinks, productId);
       goTo("idle");
       setProduct(null);
+      setCapturedBase64(null);
     } catch (e) {
       setError((e as Error).message);
       goTo("confirm");
     }
   }
 
+  function retakePhoto() {
+    imageRequestId.current += 1;
+    setError(null);
+    setCapturedUri(null);
+    setCapturedBase64(null);
+    setProductImageUrl(null);
+    goTo("idle");
+  }
+
   const busy = stage === "identifying";
+  const showCamera = stage !== "paste" && Boolean(permission?.granted);
 
   return (
     <View style={styles.flex}>
-      <CameraView ref={cameraRef} style={styles.flex} facing="back" />
+      {showCamera ? (
+        <CameraView ref={cameraRef} style={styles.flex} facing="back" />
+      ) : (
+        <View style={[styles.flex, { backgroundColor: colors.bg }]} />
+      )}
 
-      {stage === "idle" && (
+      {stage === "idle" && showCamera && (
         <View pointerEvents="none" style={styles.finderWrap}>
           <ScannerFrame />
           <Text style={styles.finderHint}>Center the product in frame</Text>
@@ -160,6 +287,46 @@ export function ScanScreen({
               </LinearGradient>
             </Tappable>
             <Text style={styles.captureLabel}>{stage === "idle" ? "Tap to scan" : "Identifying product..."}</Text>
+            {stage === "idle" && (
+              <Tappable onPress={() => goTo("paste")} style={styles.linkBtn}>
+                <Ionicons name="link-outline" size={14} color={colors.accent} />
+                <Text style={styles.linkBtnText}>Paste product link</Text>
+              </Tappable>
+            )}
+          </FadeIn>
+        )}
+
+        {stage === "paste" && (
+          <FadeIn style={{ gap: 12 }}>
+            <Text style={styles.pasteTitle}>Paste a product link</Text>
+            <TextInput
+              value={pasteUrl}
+              onChangeText={setPasteUrl}
+              placeholder="https://www.amazon.in/..."
+              placeholderTextColor={colors.textFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={styles.pasteInput}
+            />
+            <View style={styles.row}>
+              <Tappable onPress={() => goTo("idle")} style={[styles.secondaryBtn, styles.flexBtn]}>
+                <Text style={styles.secondaryBtnText}>Camera</Text>
+              </Tappable>
+              <Tappable
+                onPress={() => pasteUrl.trim() && runIdentifyUrl(pasteUrl)}
+                style={styles.flexBtn}
+              >
+                <LinearGradient
+                  colors={goldGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.primaryBtnFill}
+                >
+                  <Text style={styles.primaryBtnText}>Identify</Text>
+                </LinearGradient>
+              </Tappable>
+            </View>
           </FadeIn>
         )}
 
@@ -186,7 +353,7 @@ export function ScanScreen({
             </View>
 
             <View style={styles.row}>
-              <Tappable onPress={() => goTo("idle")} style={[styles.secondaryBtn, styles.flexBtn]}>
+              <Tappable onPress={retakePhoto} style={[styles.secondaryBtn, styles.flexBtn]}>
                 <Ionicons name="camera-reverse-outline" size={15} color={colors.text} />
                 <Text style={styles.secondaryBtnText} numberOfLines={1}>
                   Retake
@@ -199,9 +366,50 @@ export function ScanScreen({
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnFill}
                 >
-                  <Ionicons name="search-outline" size={15} color={colors.onAccent} />
+                  <Ionicons name={error ? "refresh-outline" : "search-outline"} size={15} color={colors.onAccent} />
                   <Text style={styles.primaryBtnText} numberOfLines={1}>
-                    Research
+                    {error ? "Retry" : "Research"}
+                  </Text>
+                </LinearGradient>
+              </Tappable>
+            </View>
+          </FadeIn>
+        )}
+
+        {stage === "identifyFailed" && (
+          <FadeIn style={{ gap: 16 }}>
+            <View style={styles.confirmHeader}>
+              <ProductThumb category="generic" status="empty" imageUrl={null} fallbackUri={capturedUri} />
+              <View style={styles.confirmTextWrap}>
+                <Text style={styles.productName} numberOfLines={2}>
+                  Couldn't identify this
+                </Text>
+                <Text style={styles.productMeta} numberOfLines={2}>
+                  Same photo is still ready to go - try again, or retake.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.row}>
+              <Tappable onPress={retakePhoto} style={[styles.secondaryBtn, styles.flexBtn]}>
+                <Ionicons name="camera-reverse-outline" size={15} color={colors.text} />
+                <Text style={styles.secondaryBtnText} numberOfLines={1}>
+                  Retake
+                </Text>
+              </Tappable>
+              <Tappable
+                onPress={() => capturedBase64 && runIdentify(capturedBase64)}
+                style={styles.flexBtn}
+              >
+                <LinearGradient
+                  colors={goldGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.primaryBtnFill}
+                >
+                  <Ionicons name="refresh-outline" size={15} color={colors.onAccent} />
+                  <Text style={styles.primaryBtnText} numberOfLines={1}>
+                    Retry
                   </Text>
                 </LinearGradient>
               </Tappable>
@@ -366,4 +574,18 @@ const styles = StyleSheet.create({
   primaryBtnText: { fontFamily: fonts.sansBold, color: colors.onAccent, fontSize: 14, flexShrink: 1 },
 
   info: { fontFamily: fonts.sansSemiBold, color: colors.text, fontSize: 14.5 },
+  linkBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, padding: 8 },
+  linkBtnText: { fontFamily: fonts.sansSemiBold, color: colors.accent, fontSize: 13 },
+  pasteTitle: { fontFamily: fonts.serif, color: colors.text, fontSize: 20 },
+  pasteInput: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: colors.text,
+    fontFamily: fonts.sans,
+    fontSize: 14,
+  },
 });

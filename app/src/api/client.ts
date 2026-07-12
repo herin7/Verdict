@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { getAccessToken } from "../lib/supabase";
 import type {
   BestInCategory,
   BuyLink,
@@ -10,53 +11,70 @@ import type {
   VersionHistory,
 } from "../types";
 
-// Android emulator maps host loopback to 10.0.2.2. Override with EXPO_PUBLIC_API_URL.
 const DEFAULT_HOST = Platform.OS === "android" ? "10.0.2.2" : "localhost";
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? `http://${DEFAULT_HOST}:8787`;
 
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: { ...(await authHeaders()), ...(init?.headers as Record<string, string>) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function identify(imageBase64: string): Promise<ProductIdentity> {
-  const res = await fetch(`${BASE_URL}/identify`, {
+  const json = await api<{ product: ProductIdentity }>("/identify", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ imageBase64 }),
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Identify failed");
-  return (await res.json()).product;
+  return json.product;
 }
 
 export async function research(
   product: ProductIdentity
-): Promise<{ report: ConsensusReport; buyLinks: BuyLink[] }> {
-  const res = await fetch(`${BASE_URL}/research`, {
+): Promise<{ report: ConsensusReport; buyLinks: BuyLink[]; productId: string | null; cached: boolean }> {
+  const json = await api<{
+    report: ConsensusReport;
+    buyLinks: BuyLink[];
+    productId?: string | null;
+    cached?: boolean;
+  }>("/research", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ product }),
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Research failed");
-  const json = await res.json();
-  return { report: json.report, buyLinks: json.buyLinks ?? [] };
+  return {
+    report: json.report,
+    buyLinks: json.buyLinks ?? [],
+    productId: json.productId ?? null,
+    cached: Boolean(json.cached),
+  };
 }
 
 export async function findBuyLinks(query: string): Promise<BuyLink[]> {
-  const res = await fetch(`${BASE_URL}/buy-link`, {
+  const json = await api<{ links: BuyLink[] }>("/buy-link", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Buy-link lookup failed");
-  return (await res.json()).links ?? [];
+  return json.links ?? [];
 }
 
-/** Best-effort real product photo lookup. Never throws - resolves null on any failure so the UI can fall back. */
 export async function getProductImage(product: ProductIdentity): Promise<string | null> {
   try {
-    const res = await fetch(`${BASE_URL}/product-image`, {
+    const json = await api<{ imageUrl: string | null }>("/product-image", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ product }),
     });
-    if (!res.ok) return null;
-    const json = await res.json();
     return typeof json.imageUrl === "string" ? json.imageUrl : null;
   } catch {
     return null;
@@ -70,16 +88,110 @@ interface InsightMap {
   "best-in-category": BestInCategory;
 }
 
-/** Fetches a single deep-dive insight card. Independent of /research so a slow or failed one never blocks the report. */
 export async function getInsight<T extends InsightType>(
   type: T,
   product: ProductIdentity
 ): Promise<InsightMap[T]> {
-  const res = await fetch(`${BASE_URL}/insights`, {
+  const json = await api<{ insight: InsightMap[T] }>("/insights", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type, product }),
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Insight lookup failed");
-  return (await res.json()).insight;
+  return json.insight;
+}
+
+export async function fetchSavedReports() {
+  return api<{
+    items: Array<{
+      id: string;
+      savedAt: number;
+      productId: string;
+      product: ProductIdentity;
+      report: ConsensusReport | null;
+      buyLinks: BuyLink[];
+      imageUrl: string | null;
+    }>;
+  }>("/me/saved");
+}
+
+export async function saveRemoteReport(productId: string) {
+  return api<{ ok: boolean }>("/me/saved", {
+    method: "POST",
+    body: JSON.stringify({ productId }),
+  });
+}
+
+export async function deleteRemoteReport(productId: string) {
+  return api<{ ok: boolean }>(`/me/saved/${productId}`, { method: "DELETE" });
+}
+
+export async function fetchScanStats() {
+  return api<{
+    count: number;
+    items: Array<{
+      id: string;
+      createdAt: number;
+      productId: string;
+      product: ProductIdentity;
+      imageUrl: string | null;
+    }>;
+  }>("/me/scans");
+}
+
+export async function identifyUrl(url: string): Promise<{
+  product: ProductIdentity;
+  sourceUrl: string;
+  marketplaceId: string | null;
+  method: string;
+}> {
+  const json = await api<{
+    product: ProductIdentity;
+    sourceUrl: string;
+    marketplaceId: string | null;
+    method: string;
+  }>("/identify-url", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+  return json;
+}
+
+export async function compareEverywhere(product: ProductIdentity, gtin?: string | null) {
+  return api<{
+    offers: import("../types").MarketplaceOffer[];
+    productId: string | null;
+    cached: boolean;
+  }>("/compare", {
+    method: "POST",
+    body: JSON.stringify({ product, gtin: gtin ?? null }),
+  });
+}
+
+export async function fetchDeals(product: ProductIdentity, methods?: string[]) {
+  return api<{
+    deals: import("../types").RankedDeal[];
+    productId: string | null;
+    cached: boolean;
+    methodsUsed: string[];
+  }>("/deals", {
+    method: "POST",
+    body: JSON.stringify({ product, methods }),
+  });
+}
+
+export async function getPaymentProfile() {
+  return api<{
+    methods: import("../types").PaymentMethodId[];
+    catalog: import("../types").PaymentCatalogItem[];
+  }>("/me/payment-profile");
+}
+
+export async function savePaymentProfile(methods: string[]) {
+  return api<{ ok: boolean; methods: string[] }>("/me/payment-profile", {
+    method: "PUT",
+    body: JSON.stringify({ methods }),
+  });
+}
+
+export async function getDealsCatalog() {
+  return api<{ methods: import("../types").PaymentCatalogItem[] }>("/deals/catalog");
 }

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
+  LayoutAnimation,
   Linking,
   ScrollView,
   Share,
@@ -19,7 +20,9 @@ import { Tappable } from "../components/Tappable";
 import { Badge } from "../components/Badge";
 import { ScoreGauge } from "../components/ScoreGauge";
 import { CategoryIcon, Favicon, SourceTypeIcon, categoryIconName } from "../components/Icons";
+import { VintageIcon } from "../components/VintageIcon";
 import { InsightCard } from "../components/InsightCard";
+import { CompareDealsSection } from "../components/CompareDealsSection";
 import {
   BestInCategoryContent,
   LongTermContent,
@@ -48,6 +51,25 @@ interface AltBuyState {
   loading: boolean;
   links?: BuyLink[];
   error?: boolean;
+}
+
+function parsePriceNumber(price: string | null): number | null {
+  if (!price) return null;
+  const digits = price.replace(/[^\d.]/g, "");
+  const n = parseFloat(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Cheapest-first, prices found before unpriced links - so the comparison is actually useful. */
+function sortByPrice(links: BuyLink[]): BuyLink[] {
+  return [...links].sort((a, b) => {
+    const pa = parsePriceNumber(a.price);
+    const pb = parsePriceNumber(b.price);
+    if (pa === null && pb === null) return 0;
+    if (pa === null) return 1;
+    if (pb === null) return -1;
+    return pa - pb;
+  });
 }
 
 export function ReportScreen({
@@ -138,7 +160,9 @@ export function ReportScreen({
             <View style={styles.heroTop}>
               <View style={{ flex: 1, gap: 8 }}>
                 <Badge label={verdictLabel[report.verdict]} color={color} icon="flash-outline" />
-                <Text style={styles.verdictLine}>{report.verdictLine}</Text>
+                <Text style={styles.verdictLine} numberOfLines={4}>
+                  {report.verdictLine}
+                </Text>
               </View>
               <ScoreGauge score={report.score} color={color} />
             </View>
@@ -152,30 +176,62 @@ export function ReportScreen({
 
       {buyLinks.length > 0 && (
         <Section icon="cart-outline" title="Buy now">
-          {buyLinks.map((b, i) => (
-            <Tappable
-              key={i}
-              onPress={() => Linking.openURL(b.url)}
-              style={[styles.buyRow, i === 0 && styles.sourceRowFirst]}
-            >
-              <Favicon url={b.url} size={26} />
-              <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={styles.buyRetailer}>{b.retailer}</Text>
-                <Text style={styles.buyTitle} numberOfLines={1}>
-                  {b.title}
-                </Text>
-              </View>
-              <View style={styles.buyCta}>
-                <Text style={styles.buyCtaText}>Open</Text>
-                <Ionicons name="arrow-forward" size={12} color={colors.onAccent} />
-              </View>
-            </Tappable>
-          ))}
+          {(() => {
+            const sorted = sortByPrice(buyLinks);
+            const pricedCount = sorted.filter((b) => b.price).length;
+            const bestUrl = pricedCount > 1 ? sorted[0].url : null;
+            return (
+              <>
+                {pricedCount > 0 && (
+                  <Text style={styles.buyCompareLine}>
+                    Compared across {sorted.length} platform{sorted.length === 1 ? "" : "s"}
+                    {bestUrl ? ` - lowest is ${sorted[0].price}` : ""}
+                  </Text>
+                )}
+                {sorted.map((b, i) => (
+                  <Tappable
+                    key={i}
+                    onPress={() => Linking.openURL(b.url)}
+                    style={[styles.buyRow, i === 0 && styles.sourceRowFirst]}
+                  >
+                    <Favicon url={b.url} size={26} />
+                    <View style={{ flex: 1, marginLeft: 10, minWidth: 0 }}>
+                      <View style={styles.buyRetailerRow}>
+                        <Text style={styles.buyRetailer} numberOfLines={1}>
+                          {b.retailer}
+                        </Text>
+                        {b.url === bestUrl && <Badge label="Best price" color={colors.buy} />}
+                      </View>
+                      <Text style={styles.buyTitle} numberOfLines={1}>
+                        {b.title}
+                      </Text>
+                    </View>
+                    {b.price ? (
+                      <View style={[styles.buyPriceTag, b.url === bestUrl && styles.buyPriceTagBest]}>
+                        <Text style={[styles.buyPrice, b.url === bestUrl && styles.buyPriceBest]}>
+                          {b.price}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.buyCta}>
+                        <Text style={styles.buyCtaText}>Open</Text>
+                        <Ionicons name="arrow-forward" size={12} color={colors.onAccent} />
+                      </View>
+                    )}
+                  </Tappable>
+                ))}
+              </>
+            );
+          })()}
         </Section>
       )}
 
+      <CompareDealsSection product={product} />
+
       <Section icon="chatbubble-ellipses-outline" title="Internet consensus">
-        <Text style={styles.body}>{report.consensus}</Text>
+        <Text style={styles.body} numberOfLines={6}>
+          {report.consensus}
+        </Text>
       </Section>
 
       <View style={styles.twoCol}>
@@ -195,21 +251,17 @@ export function ReportScreen({
         />
       </View>
 
-      <Bullets title="Long-term ownership issues" items={report.longTermIssues} tint={colors.wait} icon="hourglass-outline" />
-      <Bullets title="Common failures" items={report.commonFailures} tint={colors.avoid} icon="warning-outline" />
-
-      <Section icon="shield-checkmark-outline" title="Fake / biased review signal">
-        <Badge
-          label={`${report.fakeReviewSignal.level} risk`}
-          color={FAKE_SIGNAL_COLOR[report.fakeReviewSignal.level]}
-          icon="alert-circle-outline"
-        />
-        <Text style={[styles.body, { marginTop: 8 }]}>{report.fakeReviewSignal.note}</Text>
-      </Section>
-
-      <Section icon={TREND_ICON[report.priceAnalysis.trend]} title="Price analysis">
-        <Text style={styles.body}>{report.priceAnalysis.summary}</Text>
+      <GlassCard style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <VintageIcon name="shield-checkmark-outline" />
+          <Text style={styles.sectionTitle}>Trust & price</Text>
+        </View>
         <View style={styles.priceRow}>
+          <Badge
+            label={`${report.fakeReviewSignal.level} fake-review risk`}
+            color={FAKE_SIGNAL_COLOR[report.fakeReviewSignal.level]}
+            icon="alert-circle-outline"
+          />
           <Badge
             label={report.priceAnalysis.trend}
             color={colors.accent}
@@ -221,59 +273,40 @@ export function ReportScreen({
             icon={report.priceAnalysis.shouldWaitForSale ? "time-outline" : "checkmark-outline"}
           />
         </View>
-        <Text style={[styles.body, { marginTop: 8 }]}>{report.priceAnalysis.reason}</Text>
-      </Section>
+        <Text style={[styles.body, styles.compactBody]} numberOfLines={3}>
+          {report.priceAnalysis.summary} {report.priceAnalysis.reason}
+        </Text>
+        <Text style={[styles.body, styles.compactBody, { color: colors.textMuted }]} numberOfLines={2}>
+          {report.fakeReviewSignal.note}
+        </Text>
+      </GlassCard>
+
+      {(report.longTermIssues.length > 0 || report.commonFailures.length > 0) && (
+        <CollapsibleSection
+          icon="hourglass-outline"
+          title="Known issues"
+          preview={`${report.longTermIssues.length + report.commonFailures.length} issue${
+            report.longTermIssues.length + report.commonFailures.length === 1 ? "" : "s"
+          } reported by long-term owners`}
+        >
+          <SubBullets title="Long-term ownership" items={report.longTermIssues} tint={colors.wait} icon="hourglass-outline" />
+          <SubBullets title="Common failures" items={report.commonFailures} tint={colors.avoid} icon="warning-outline" />
+        </CollapsibleSection>
+      )}
 
       {report.alternatives.length > 0 && (
         <Section icon="swap-horizontal-outline" title="Best alternatives">
-          {report.alternatives.map((a, i) => {
-            const st = altBuy[i];
-            return (
-              <View key={i} style={styles.altRow}>
-                <View style={styles.altDot} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.altName}>{a.name}</Text>
-                  <Text style={styles.altWhy}>{a.why}</Text>
-
-                  {!st && (
-                    <Tappable onPress={() => findAltBuyLinks(i, a.name)} style={styles.altFindBtn}>
-                      <Ionicons name="search-outline" size={12} color={colors.accent} />
-                      <Text style={styles.altFindText}>Find where to buy</Text>
-                    </Tappable>
-                  )}
-
-                  {st?.loading && (
-                    <ActivityIndicator style={{ marginTop: 8, alignSelf: "flex-start" }} color={colors.accent} size="small" />
-                  )}
-
-                  {st?.links && st.links.length > 0 && (
-                    <View style={{ marginTop: 8, gap: 6 }}>
-                      {st.links.map((b, j) => (
-                        <Tappable key={j} onPress={() => Linking.openURL(b.url)} style={styles.altBuyRow}>
-                          <Favicon url={b.url} size={16} />
-                          <Text style={styles.altBuyText} numberOfLines={1}>
-                            {b.retailer}
-                          </Text>
-                          <Ionicons name="open-outline" size={12} color={colors.textFaint} />
-                        </Tappable>
-                      ))}
-                    </View>
-                  )}
-
-                  {st?.links && st.links.length === 0 && (
-                    <Text style={styles.altBuyEmpty}>No buy links found</Text>
-                  )}
-                  {st?.error && <Text style={styles.altBuyEmpty}>Couldn't look this up right now</Text>}
-                </View>
-              </View>
-            );
-          })}
+          <ExpandableAlternatives
+            alternatives={report.alternatives}
+            altBuy={altBuy}
+            onFindBuyLinks={findAltBuyLinks}
+          />
         </Section>
       )}
 
       <View style={styles.deepDiveSection}>
         <View style={styles.sectionHeader}>
-          <Ionicons name="layers-outline" size={15} color={colors.accent} />
+          <VintageIcon name="layers-outline" />
           <Text style={styles.sectionTitle}>Deep dive</Text>
         </View>
 
@@ -316,7 +349,11 @@ export function ReportScreen({
       </GlassCard>
 
       {report.sources.length > 0 && (
-        <Section icon="link-outline" title={`Sources (${report.sources.length})`}>
+        <CollapsibleSection
+          icon="link-outline"
+          title="Sources"
+          preview={`${report.sources.length} source${report.sources.length === 1 ? "" : "s"} used to build this report`}
+        >
           {report.sources.map((s, i) => (
             <Tappable
               key={i}
@@ -324,7 +361,7 @@ export function ReportScreen({
               style={[styles.sourceRow, i === 0 && styles.sourceRowFirst]}
             >
               <Favicon url={s.url} size={22} />
-              <View style={{ flex: 1, marginLeft: 10 }}>
+              <View style={{ flex: 1, marginLeft: 10, minWidth: 0 }}>
                 <Text style={styles.sourceTitle} numberOfLines={1}>
                   {s.title || s.url}
                 </Text>
@@ -336,7 +373,7 @@ export function ReportScreen({
               <Ionicons name="open-outline" size={16} color={colors.textFaint} />
             </Tappable>
           ))}
-        </Section>
+        </CollapsibleSection>
       )}
 
       <Tappable onPress={onBack} style={styles.scanAgainWrap}>
@@ -361,7 +398,7 @@ function Section({
   return (
     <GlassCard style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Ionicons name={icon} size={15} color={colors.accent} />
+        <VintageIcon name={icon} />
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       {children}
@@ -386,13 +423,153 @@ function Bullets({
   return (
     <GlassCard style={[styles.section, style]}>
       <Text style={[styles.sectionTitle, { marginBottom: 4 }]}>{title}</Text>
-      {items.map((it, i) => (
+      {items.slice(0, 4).map((it, i) => (
         <View key={i} style={styles.bulletRow}>
           <Ionicons name={icon} size={15} color={tint} style={{ marginTop: 2 }} />
-          <Text style={styles.body}>{it}</Text>
+          <Text style={styles.body} numberOfLines={3}>
+            {it}
+          </Text>
         </View>
       ))}
     </GlassCard>
+  );
+}
+
+/** Same bullet look as `Bullets`, but bare (no GlassCard) - used inside a CollapsibleSection body. */
+function SubBullets({
+  title,
+  items,
+  tint,
+  icon,
+}: {
+  title: string;
+  items: string[];
+  tint: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}) {
+  if (!items.length) return null;
+  return (
+    <View style={styles.subBulletGroup}>
+      <Text style={styles.subBulletTitle}>{title}</Text>
+      {items.slice(0, 4).map((it, i) => (
+        <View key={i} style={styles.bulletRow}>
+          <Ionicons name={icon} size={14} color={tint} style={{ marginTop: 2 }} />
+          <Text style={styles.body} numberOfLines={3}>
+            {it}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** Collapsed by default: shows a one-line preview, expands in place on tap - keeps deep detail out of the way. */
+function CollapsibleSection({
+  icon,
+  title,
+  preview,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  preview: string;
+  children: React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  function toggle() {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((e) => !e);
+  }
+
+  return (
+    <GlassCard style={styles.section}>
+      <Tappable onPress={toggle} style={styles.collapsibleHeaderRow}>
+        <View style={styles.sectionHeader}>
+          <VintageIcon name={icon} />
+          <Text style={styles.sectionTitle}>{title}</Text>
+        </View>
+        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
+      </Tappable>
+      {!expanded && (
+        <Text style={styles.collapsiblePreview} numberOfLines={2}>
+          {preview}
+        </Text>
+      )}
+      {expanded && <View style={styles.collapsibleBody}>{children}</View>}
+    </GlassCard>
+  );
+}
+
+/** Alternatives, capped to 2 with a "show more" toggle so the report doesn't front-load every option. */
+function ExpandableAlternatives({
+  alternatives,
+  altBuy,
+  onFindBuyLinks,
+}: {
+  alternatives: { name: string; why: string }[];
+  altBuy: Record<number, AltBuyState>;
+  onFindBuyLinks: (i: number, name: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? alternatives : alternatives.slice(0, 2);
+  const remaining = alternatives.length - visible.length;
+
+  return (
+    <>
+      {visible.map((a, i) => {
+        const st = altBuy[i];
+        return (
+          <View key={i} style={styles.altRow}>
+            <View style={styles.altDot} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.altName} numberOfLines={1}>
+                {a.name}
+              </Text>
+              <Text style={styles.altWhy} numberOfLines={2}>
+                {a.why}
+              </Text>
+
+              {!st && (
+                <Tappable onPress={() => onFindBuyLinks(i, a.name)} style={styles.altFindBtn}>
+                  <Ionicons name="search-outline" size={12} color={colors.accent} />
+                  <Text style={styles.altFindText}>Find where to buy</Text>
+                </Tappable>
+              )}
+
+              {st?.loading && (
+                <ActivityIndicator style={{ marginTop: 8, alignSelf: "flex-start" }} color={colors.accent} size="small" />
+              )}
+
+              {st?.links && st.links.length > 0 && (
+                <View style={{ marginTop: 8, gap: 6 }}>
+                  {sortByPrice(st.links).map((b, j) => (
+                    <Tappable key={j} onPress={() => Linking.openURL(b.url)} style={styles.altBuyRow}>
+                      <Favicon url={b.url} size={16} />
+                      <Text style={styles.altBuyText} numberOfLines={1}>
+                        {b.retailer}
+                      </Text>
+                      {b.price && <Text style={styles.altBuyPrice}>{b.price}</Text>}
+                      <Ionicons name="open-outline" size={12} color={colors.textFaint} />
+                    </Tappable>
+                  ))}
+                </View>
+              )}
+
+              {st?.links && st.links.length === 0 && <Text style={styles.altBuyEmpty}>No buy links found</Text>}
+              {st?.error && <Text style={styles.altBuyEmpty}>Couldn't look this up right now</Text>}
+            </View>
+          </View>
+        );
+      })}
+
+      {remaining > 0 && (
+        <Tappable onPress={() => setShowAll(true)} style={styles.altFindBtn}>
+          <Ionicons name="chevron-down" size={13} color={colors.accent} />
+          <Text style={styles.altFindText}>Show {remaining} more</Text>
+        </Tappable>
+      )}
+    </>
   );
 }
 
@@ -426,9 +603,22 @@ const styles = StyleSheet.create({
 
   section: { gap: 8 },
   deepDiveSection: { gap: 10 },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 2 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 2, flexShrink: 1, minWidth: 0 },
   sectionTitle: { ...font.label, color: colors.textMuted },
   body: { fontFamily: fonts.sans, color: colors.text, fontSize: 14.5, lineHeight: 21 },
+  compactBody: { fontSize: 13.5, lineHeight: 19, marginTop: 8 },
+
+  collapsibleHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  collapsiblePreview: {
+    fontFamily: fonts.sans,
+    color: colors.textFaint,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  collapsibleBody: { marginTop: 10, gap: 12 },
+  subBulletGroup: { gap: 2 },
+  subBulletTitle: { fontFamily: fonts.sansBold, color: colors.textFaint, fontSize: 11.5, letterSpacing: 0.5, marginBottom: 2 },
 
   twoCol: { flexDirection: "row", gap: 12 },
   colHalf: { flex: 1 },
@@ -445,12 +635,19 @@ const styles = StyleSheet.create({
   altFindText: { fontFamily: fonts.sansBold, color: colors.accent, fontSize: 12.5 },
   altBuyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   altBuyText: { fontFamily: fonts.sansSemiBold, color: colors.text, fontSize: 12.5, flex: 1 },
+  altBuyPrice: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 13.5 },
   altBuyEmpty: { fontFamily: fonts.sans, color: colors.textFaint, fontSize: 12, fontStyle: "italic", marginTop: 6 },
 
   adviceCard: { gap: 8, borderColor: "rgba(255,215,109,0.3)" },
   adviceHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
   adviceTitle: { ...font.label, color: colors.accent },
 
+  buyCompareLine: {
+    fontFamily: fonts.sansSemiBold,
+    color: colors.textFaint,
+    fontSize: 12,
+    marginBottom: 2,
+  },
   buyRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -458,8 +655,24 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.06)",
   },
-  buyRetailer: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14 },
+  buyRetailerRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  buyRetailer: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14, flexShrink: 1 },
   buyTitle: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 12, marginTop: 1 },
+  buyPriceTag: {
+    flexShrink: 0,
+    backgroundColor: "rgba(255,215,109,0.12)",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "rgba(255,215,109,0.22)",
+  },
+  buyPriceTagBest: {
+    backgroundColor: colors.buy,
+    borderColor: colors.buy,
+  },
+  buyPrice: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 16.5 },
+  buyPriceBest: { color: colors.onAccent },
   buyCta: {
     flexDirection: "row",
     alignItems: "center",
