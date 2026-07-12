@@ -4,3 +4,9 @@ dist
 web-build
 .env
 *.log
+/android
+/ios
+android/local.properties
+modules/*/android/build
+modules/*/android/.cxx
+modules/*/android/.gradle

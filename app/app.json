@@ -1,20 +1,26 @@
 {
   "expo": {
-    "name": "Consensus Scanner",
+    "name": "Verdict",
     "slug": "anakin-consensus",
     "version": "0.1.0",
     "orientation": "portrait",
+    "scheme": "verdict",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.verdict.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Point your camera at a product to research it."
       }
     },
     "android": {
+      "package": "com.verdict.app",
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "SYSTEM_ALERT_WINDOW",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -26,7 +32,21 @@
       ],
       "expo-sharing",
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-secure-store",
+      "expo-dev-client",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": ["text/*", "image/*"],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true
+          }
+        }
+      ],
+      "./modules/verdict-overlay/app.plugin.js",
+      "./modules/verdict-accessibility/app.plugin.js"
     ]
   }
 }
