@@ -9,7 +9,7 @@ class VerdictAccessibilityModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("VerdictAccessibility")
 
-    Events("onScreenText")
+    Events("onScreenText", "onLeftShoppingApp")
 
     OnCreate {
       VerdictAccessibilityBridge.emitter = { name, body ->
@@ -34,6 +34,15 @@ class VerdictAccessibilityModule : Module() {
 
     Function("getLastScreenText") {
       VerdictAccessibilityService.lastText
+    }
+
+    Function("getLastPackageName") {
+      VerdictAccessibilityService.lastPackage
+    }
+
+    Function("setWatchlist") { packages: List<String> ->
+      VerdictAccessibilityService.watchlist = packages.toSet()
+      null
     }
   }
 }
