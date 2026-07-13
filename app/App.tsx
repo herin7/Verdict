@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Platform, SafeAreaView, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
@@ -10,6 +10,21 @@ import {
 import { Arimo_400Regular, Arimo_500Medium, Arimo_600SemiBold, Arimo_700Bold } from "@expo-google-fonts/arimo";
 import { JetBrainsMono_500Medium, JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono";
 import { ShareIntentProvider, useShareIntentContext } from "expo-share-intent";
+import {
+  addBubbleTapListener,
+  canDrawOverlays,
+  hideBubble,
+  isBubbleVisible,
+  isOverlaySupported,
+  showBubble,
+} from "verdict-overlay";
+import {
+  addLeftShoppingAppListener,
+  addScreenTextListener,
+  isAccessibilityServiceEnabled,
+  isAccessibilitySupported,
+  setWatchlist,
+} from "verdict-accessibility";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -19,6 +34,7 @@ import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { PaymentRewardsScreen } from "./src/screens/PaymentRewardsScreen";
 import { OverlaySettingsScreen } from "./src/screens/OverlaySettingsScreen";
 import { colors } from "./src/theme";
+import { WATCHED_PACKAGE_NAMES } from "./src/overlayApps";
 import {
   deleteReport,
   getOnboardingDone,
@@ -40,6 +56,8 @@ import { supabase, supabaseConfigured } from "./src/lib/supabase";
 import type { BuyLink, ConsensusReport, ProductIdentity, SavedReport } from "./src/types";
 
 type Screen = "dashboard" | "scan" | "library" | "report" | "payments" | "overlay";
+
+type ScreenTextPayload = { text: string; packageName: string };
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -74,7 +92,9 @@ function AppInner() {
   const [library, setLibrary] = useState<SavedReport[]>([]);
   const [scanCount, setScanCountState] = useState(0);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [captureBase64, setCaptureBase64] = useState<string | null>(null);
+  const [screenText, setScreenText] = useState<ScreenTextPayload | null>(null);
+
+  const latestScreenText = useRef<ScreenTextPayload | null>(null);
 
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
 
@@ -88,6 +108,7 @@ function AppInner() {
       null;
     if (candidate) {
       setShareUrl(candidate.trim());
+      setScreenText(null);
       setView("scan");
       resetShareIntent();
     }
@@ -123,6 +144,42 @@ function AppInner() {
       refreshLibrary();
       refreshScans();
     }
+  }, [username]);
+
+  // Cast-free shopping overlay: watchlist + auto bubble + tap to research
+  useEffect(() => {
+    if (Platform.OS !== "android" || !username) return;
+    if (!isAccessibilitySupported && !isOverlaySupported) return;
+
+    if (isAccessibilitySupported) {
+      setWatchlist(WATCHED_PACKAGE_NAMES);
+    }
+
+    const textSub = addScreenTextListener((text, packageName) => {
+      latestScreenText.current = { text, packageName };
+      if (!isOverlaySupported) return;
+      if (!canDrawOverlays()) return;
+      if (!isAccessibilityServiceEnabled()) return;
+      if (!isBubbleVisible()) showBubble();
+    });
+
+    const leftSub = addLeftShoppingAppListener(() => {
+      if (isOverlaySupported && isBubbleVisible()) hideBubble();
+    });
+
+    const tapSub = addBubbleTapListener(() => {
+      const cached = latestScreenText.current;
+      if (!cached?.text?.trim()) return;
+      setShareUrl(null);
+      setScreenText({ ...cached });
+      setView("scan");
+    });
+
+    return () => {
+      textSub.remove();
+      leftSub.remove();
+      tapSub.remove();
+    };
   }, [username]);
 
   async function refreshLibrary() {
@@ -166,6 +223,7 @@ function AppInner() {
   async function handleLogout() {
     if (supabaseConfigured && supabase) await supabase.auth.signOut();
     setUsername(null);
+    if (isOverlaySupported && isBubbleVisible()) hideBubble();
   }
 
   async function finishOnboarding() {
@@ -245,11 +303,10 @@ function AppInner() {
     setCurrent(null);
   }
 
-  const onCaptureBase64 = useCallback((base64: string) => {
-    setCaptureBase64(base64);
+  function clearScanInputs() {
     setShareUrl(null);
-    setView("scan");
-  }, []);
+    setScreenText(null);
+  }
 
   if (!fontsLoaded || !authChecked) {
     return (
@@ -288,8 +345,7 @@ function AppInner() {
           savedCount={library.length}
           recent={library}
           onScan={() => {
-            setShareUrl(null);
-            setCaptureBase64(null);
+            clearScanInputs();
             setView("scan");
           }}
           onLibrary={() => setView("library")}
@@ -302,9 +358,7 @@ function AppInner() {
 
       {view === "payments" && <PaymentRewardsScreen onBack={() => setView("dashboard")} />}
 
-      {view === "overlay" && (
-        <OverlaySettingsScreen onBack={() => setView("dashboard")} onCaptureBase64={onCaptureBase64} />
-      )}
+      {view === "overlay" && <OverlaySettingsScreen onBack={() => setView("dashboard")} />}
 
       {view === "report" && current && (
         <ReportScreen
@@ -320,15 +374,13 @@ function AppInner() {
       {view === "scan" && (
         <ScanScreen
           initialUrl={shareUrl}
-          initialImageBase64={captureBase64}
+          initialScreenText={screenText}
           onReport={(report, product, buyLinks, productId) => {
-            setShareUrl(null);
-            setCaptureBase64(null);
+            clearScanInputs();
             openReport(report, product, buyLinks, productId);
           }}
           onHome={() => {
-            setShareUrl(null);
-            setCaptureBase64(null);
+            clearScanInputs();
             setView("dashboard");
           }}
         />

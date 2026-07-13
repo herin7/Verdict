@@ -3,10 +3,11 @@ import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "../components/Tappable";
 import { colors, fonts, radius } from "../theme";
+import { WATCHED_SHOPPING_APPS } from "../overlayApps";
 import {
-  addBubbleTapListener,
   canDrawOverlays,
   hideBubble,
+  isBubbleVisible,
   isOverlaySupported,
   requestOverlayPermission,
   showBubble,
@@ -17,101 +18,127 @@ import {
   openAccessibilitySettings,
 } from "verdict-accessibility";
 
-export function OverlaySettingsScreen({
-  onBack,
-  onCaptureBase64,
-}: {
-  onBack: () => void;
-  onCaptureBase64: (base64: string) => void;
-}) {
+export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
   const [overlayOk, setOverlayOk] = useState(false);
-  const [bubbleOn, setBubbleOn] = useState(false);
   const [a11yOn, setA11yOn] = useState(false);
+  const [bubbleOn, setBubbleOn] = useState(false);
 
   useEffect(() => {
-    if (!isOverlaySupported) return;
-    setOverlayOk(canDrawOverlays());
-    setA11yOn(isAccessibilityServiceEnabled());
-
-    // Screen-capture-on-tap (MediaProjection) was removed - it forced a "Start
-    // recording or casting?" system dialog on every tap. Auto product-detection
-    // via the accessibility text stream is coming in a follow-up pass.
-    const tap = addBubbleTapListener(() => {});
-    void onCaptureBase64;
-
-    const poll = setInterval(() => {
-      setOverlayOk(canDrawOverlays());
-      setA11yOn(isAccessibilityServiceEnabled());
-    }, 2000);
-
-    return () => {
-      tap.remove();
-      clearInterval(poll);
+    if (Platform.OS !== "android") return;
+    const refresh = () => {
+      setOverlayOk(isOverlaySupported ? canDrawOverlays() : false);
+      setA11yOn(isAccessibilitySupported ? isAccessibilityServiceEnabled() : false);
+      setBubbleOn(isOverlaySupported ? isBubbleVisible() : false);
     };
-  }, [onCaptureBase64]);
+    refresh();
+    const poll = setInterval(refresh, 2000);
+    return () => clearInterval(poll);
+  }, []);
 
   if (Platform.OS !== "android") {
     return (
       <View style={styles.screen}>
         <Header onBack={onBack} />
         <Text style={styles.body}>
-          Floating overlay is Android-only. iOS Share Extension is deferred for a later cycle.
+          Shopping overlay is Android-only. iOS Share Extension comes in a later cycle.
         </Text>
       </View>
     );
   }
+
+  const ready = overlayOk && a11yOn;
 
   return (
     <View style={styles.screen}>
       <Header onBack={onBack} />
       <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 40 }}>
         <Text style={styles.body}>
-          Show a floating Verdict bubble over shopping apps. Tap it to capture the screen once and research the product.
+          Open a shopping app and Verdict appears automatically. Tap the bubble to research what is
+          on screen. No screen casting. No recording prompt.
         </Text>
 
-        <Row
-          title="Draw over other apps"
-          subtitle={overlayOk ? "Permission granted" : "Required for the floating bubble"}
-          actionLabel={overlayOk ? "Granted" : "Enable"}
-          onPress={() => requestOverlayPermission()}
-          disabled={overlayOk}
-        />
+        {ready ? (
+          <View style={styles.readyPill}>
+            <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+            <Text style={styles.readyText}>Ready - auto-detect is on</Text>
+          </View>
+        ) : (
+          <View style={styles.warnPill}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.wait} />
+            <Text style={styles.warnText}>Enable both permissions below</Text>
+          </View>
+        )}
 
-        <Row
-          title={bubbleOn ? "Hide floating bubble" : "Show floating bubble"}
-          subtitle="Persistent notification while active (Android requirement)"
-          actionLabel={bubbleOn ? "Hide" : "Show"}
-          onPress={() => {
-            if (!overlayOk) {
-              requestOverlayPermission();
-              return;
-            }
-            if (bubbleOn) {
-              hideBubble();
-              setBubbleOn(false);
-            } else {
-              showBubble();
-              setBubbleOn(true);
-            }
-          }}
-        />
-
-        <View style={styles.divider} />
-
-        <Text style={styles.disclosureTitle}>Enhanced accuracy (optional)</Text>
+        <Text style={styles.sectionTitle}>1. Accessibility</Text>
         <Text style={styles.disclosure}>
-          Verdict can read on-screen text from shopping apps to detect products automatically. This is
-          optional and off by default. It never taps, types, or controls other apps — text extraction only.
+          Reads on-screen text from shopping apps only. Never taps, types, or controls other apps.
         </Text>
-
         {isAccessibilitySupported && (
           <Row
             title="Accessibility reading"
-            subtitle={a11yOn ? "Enabled in system settings" : "Off — open system settings to enable"}
+            subtitle={a11yOn ? "Enabled in system settings" : "Required for auto-detect"}
             actionLabel={a11yOn ? "Open settings" : "Enable"}
             onPress={() => openAccessibilitySettings()}
           />
         )}
+
+        <Text style={styles.sectionTitle}>2. Display over other apps</Text>
+        <Text style={styles.disclosure}>Lets Verdict show a floating bubble while you shop.</Text>
+        {isOverlaySupported && (
+          <Row
+            title="Draw over other apps"
+            subtitle={overlayOk ? "Permission granted" : "Required for the floating bubble"}
+            actionLabel={overlayOk ? "Granted" : "Enable"}
+            onPress={() => requestOverlayPermission()}
+            disabled={overlayOk}
+          />
+        )}
+
+        {isOverlaySupported && (
+          <Row
+            title={bubbleOn ? "Hide bubble now" : "Show bubble now"}
+            subtitle="Usually auto-shows in shopping apps. Manual toggle for testing."
+            actionLabel={bubbleOn ? "Hide" : "Show"}
+            onPress={() => {
+              if (!overlayOk) {
+                requestOverlayPermission();
+                return;
+              }
+              if (bubbleOn) {
+                hideBubble();
+                setBubbleOn(false);
+              } else {
+                showBubble();
+                setBubbleOn(true);
+              }
+            }}
+          />
+        )}
+
+        <View style={styles.divider} />
+
+        <Text style={styles.sectionTitle}>Watched apps</Text>
+        <Text style={styles.disclosure}>
+          Verdict only reads these. Everything else (messages, banking, gallery, personal apps) is
+          blocked by construction.
+        </Text>
+        <View style={styles.appList}>
+          {WATCHED_SHOPPING_APPS.map((app) => (
+            <View key={app.id} style={styles.appRow}>
+              <Ionicons name="bag-handle-outline" size={16} color={colors.accent} />
+              <Text style={styles.appLabel}>{app.label}</Text>
+              <Text style={styles.appBadge}>Enabled</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.blockedBox}>
+          <Text style={styles.blockedTitle}>Blocked</Text>
+          <Text style={styles.disclosure}>
+            WhatsApp, Instagram, Gmail, banking apps, Photos, and any app not listed above. Screen
+            text from those apps is never collected.
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -168,6 +195,32 @@ const styles = StyleSheet.create({
   },
   title: { fontFamily: fonts.serif, fontSize: 22, color: colors.text },
   body: { fontFamily: fonts.sans, fontSize: 14, color: colors.textMuted, lineHeight: 20 },
+  sectionTitle: { fontFamily: fonts.serif, fontSize: 18, color: colors.text, marginTop: 4 },
+  disclosure: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  readyPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: "rgba(255,215,109,0.25)",
+  },
+  readyText: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.accent },
+  warnPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,180,80,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,180,80,0.25)",
+  },
+  warnText: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.wait },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -188,6 +241,36 @@ const styles = StyleSheet.create({
   },
   actionText: { fontFamily: fonts.sansBold, fontSize: 12, color: colors.onAccent },
   divider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 8 },
-  disclosureTitle: { fontFamily: fonts.serif, fontSize: 18, color: colors.text },
-  disclosure: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  appList: { gap: 8 },
+  appRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  appLabel: { flex: 1, fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
+  appBadge: {
+    fontFamily: fonts.sansBold,
+    fontSize: 11,
+    color: colors.accent,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  blockedBox: {
+    padding: 14,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    gap: 6,
+  },
+  blockedTitle: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.textMuted },
 });

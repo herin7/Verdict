@@ -10,7 +10,7 @@ import { FadeIn } from "../components/FadeIn";
 import { ScannerFrame } from "../components/ScannerFrame";
 import { ResearchingScreen } from "../components/ResearchingScreen";
 import { colors, fonts, goldGradient, radius } from "../theme";
-import { getProductImage, identify, identifyUrl, research } from "../api/client";
+import { getProductImage, identify, identifyScreen, identifyUrl, research } from "../api/client";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -24,11 +24,13 @@ export function ScanScreen({
   onHome,
   initialUrl,
   initialImageBase64,
+  initialScreenText,
 }: {
   onReport: (r: ConsensusReport, p: ProductIdentity, buyLinks: BuyLink[], productId?: string | null) => void;
   onHome: () => void;
   initialUrl?: string | null;
   initialImageBase64?: string | null;
+  initialScreenText?: { text: string; packageName: string } | null;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
@@ -40,6 +42,9 @@ export function ScanScreen({
   const [thumbStatus, setThumbStatus] = useState<ThumbStatus>("loading");
   const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
   const [pasteUrl, setPasteUrl] = useState(initialUrl ?? "");
+  const [screenTextForRetry, setScreenTextForRetry] = useState<{ text: string; packageName: string } | null>(
+    null
+  );
   const imageRequestId = useRef(0);
 
   useEffect(() => {
@@ -74,6 +79,13 @@ export function ScanScreen({
       })();
     }
   }, [initialImageBase64]);
+
+  useEffect(() => {
+    if (initialScreenText?.text?.trim()) {
+      setScreenTextForRetry(initialScreenText);
+      void runIdentifyFromScreen(initialScreenText);
+    }
+  }, [initialScreenText]);
 
   useEffect(() => {
     if (initialUrl?.trim()) {
@@ -179,6 +191,29 @@ export function ScanScreen({
     }
   }
 
+  async function runIdentifyFromScreen(payload: { text: string; packageName: string }) {
+    setError(null);
+    goTo("identifying");
+    try {
+      const p = await identifyScreen(payload.text, payload.packageName);
+      setProduct(p);
+      setCapturedUri(null);
+      setCapturedBase64(null);
+      goTo("confirm");
+      setThumbStatus("loading");
+      setProductImageUrl(null);
+      const requestId = ++imageRequestId.current;
+      getProductImage(p).then((u) => {
+        if (imageRequestId.current !== requestId) return;
+        setProductImageUrl(u);
+        setThumbStatus(u ? "loaded" : "empty");
+      });
+    } catch (e) {
+      setError((e as Error).message);
+      goTo("identifyFailed");
+    }
+  }
+
   async function runIdentifyUrl(url: string) {
     setError(null);
     goTo("identifying");
@@ -224,6 +259,7 @@ export function ScanScreen({
     setCapturedUri(null);
     setCapturedBase64(null);
     setProductImageUrl(null);
+    setScreenTextForRetry(null);
     goTo("idle");
   }
 
@@ -385,7 +421,9 @@ export function ScanScreen({
                   Couldn't identify this
                 </Text>
                 <Text style={styles.productMeta} numberOfLines={2}>
-                  Same photo is still ready to go - try again, or retake.
+                  {screenTextForRetry
+                    ? "Same screen text is ready - try again, or go back."
+                    : "Same photo is still ready to go - try again, or retake."}
                 </Text>
               </View>
             </View>
@@ -394,11 +432,14 @@ export function ScanScreen({
               <Tappable onPress={retakePhoto} style={[styles.secondaryBtn, styles.flexBtn]}>
                 <Ionicons name="camera-reverse-outline" size={15} color={colors.text} />
                 <Text style={styles.secondaryBtnText} numberOfLines={1}>
-                  Retake
+                  {screenTextForRetry ? "Back" : "Retake"}
                 </Text>
               </Tappable>
               <Tappable
-                onPress={() => capturedBase64 && runIdentify(capturedBase64)}
+                onPress={() => {
+                  if (screenTextForRetry) void runIdentifyFromScreen(screenTextForRetry);
+                  else if (capturedBase64) void runIdentify(capturedBase64);
+                }}
                 style={styles.flexBtn}
               >
                 <LinearGradient
