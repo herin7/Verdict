@@ -5,6 +5,8 @@ import { rejectIfBanned } from "../guard/preHandler.js";
 import { ValidationError, validateScreenText } from "../guard/validation.js";
 import { recordViolation } from "../guard/abuse.js";
 import { callToolIdentifyFromScreenText } from "../identify/llmFallback.js";
+import { MIN_IDENTIFY_CONFIDENCE } from "../guard/validation.js";
+import { cleanScreenText } from "../identify/screenText.js";
 
 const BodySchema = z.object({
   text: z.string().min(1),
@@ -26,20 +28,51 @@ export async function identifyScreenRoute(app: FastifyInstance) {
         return reply.code(400).send({ error: "text is required" });
       }
       try {
-        const text = validateScreenText(parsed.data.text);
+        const raw = validateScreenText(parsed.data.text);
+        const { cleaned, asin, priceHint } = cleanScreenText(raw);
+        req.log.info(
+          {
+            pkg: parsed.data.packageName,
+            rawLen: raw.length,
+            cleanLen: cleaned.length,
+            asin,
+            preview: cleaned.slice(0, 180),
+          },
+          "identify-screen input"
+        );
         const product = await callToolIdentifyFromScreenText({
-          text,
+          text: cleaned,
           packageName: parsed.data.packageName,
+          asin,
+          priceHint,
         });
+        if (product.confidence < MIN_IDENTIFY_CONFIDENCE) {
+          req.log.warn(
+            {
+              confidence: product.confidence,
+              name: product.name,
+              searchTerm: product.searchTerm,
+            },
+            "identify-screen low confidence"
+          );
+          throw new ValidationError("Could not confidently identify a product on screen", {
+            rejectReason: "low_confidence",
+            code: "low_confidence",
+          });
+        }
         return { product };
       } catch (err) {
         if (err instanceof ValidationError) {
-          const { banned } = await recordViolation(req, err.rejectReason ?? err.code);
-          if (banned) {
-            return reply.code(403).send({
-              error: "Temporarily banned for repeated invalid submissions",
-              code: "banned",
-            });
+          // Low-confidence screen reads are common (home feeds, search pages) —
+          // do not count toward abuse bans.
+          if (err.code !== "low_confidence" && err.code !== "text_too_short") {
+            const { banned } = await recordViolation(req, err.rejectReason ?? err.code);
+            if (banned) {
+              return reply.code(403).send({
+                error: "Temporarily banned for repeated invalid submissions",
+                code: "banned",
+              });
+            }
           }
           return reply.code(err.status).send({
             error: err.message,

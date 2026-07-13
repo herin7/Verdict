@@ -67,31 +67,59 @@ export async function callToolIdentifyFromText(ctx: {
 export async function callToolIdentifyFromScreenText(ctx: {
   text: string;
   packageName: string;
+  asin?: string | null;
+  priceHint?: string | null;
 }): Promise<ProductIdentity> {
   const tool: Anthropic.Tool = {
     name: "report_product",
-    description: "Identify the shoppable product from on-screen text extracted from a shopping app.",
+    description:
+      "Identify the single shoppable product the user is viewing on a marketplace PDP.",
     input_schema: {
       type: "object",
       properties: {
-        name: { type: "string" },
+        name: { type: "string", description: "Full product name / title" },
         brand: { type: ["string", "null"] },
         category: { type: "string" },
         model: { type: ["string", "null"] },
-        confidence: { type: "number" },
-        searchTerm: { type: "string" },
+        confidence: {
+          type: "number",
+          description:
+            "0-1. Use >=0.7 when a clear product title is present. Use <0.45 only for home/search/multi-product feeds.",
+        },
+        searchTerm: {
+          type: "string",
+          description: "Best web search query for this exact product (brand + model + key attrs)",
+        },
       },
       required: ["name", "category", "confidence", "searchTerm"],
     },
   };
 
+  const appHint = ctx.packageName.includes("amazon")
+    ? "Amazon"
+    : ctx.packageName.includes("flipkart")
+      ? "Flipkart"
+      : ctx.packageName.includes("myntra")
+        ? "Myntra"
+        : ctx.packageName;
+
   const prompt = [
-    `Source app package: ${ctx.packageName}`,
-    `On-screen text (accessibility extraction, may be noisy/out of order):`,
+    `User is inside the ${appHint} shopping app on what is likely a product detail page.`,
+    `Package: ${ctx.packageName}`,
+    ctx.asin ? `Detected ASIN: ${ctx.asin}` : null,
+    ctx.priceHint ? `Detected price fragment: ${ctx.priceHint}` : null,
+    `Cleaned on-screen text (nav chrome already removed; longest lines are usually the title):`,
     ctx.text.slice(0, 3000),
-    "Identify the single commercial product being viewed so it can be researched for a buying decision.",
-    "If no clear product is present, set confidence below 0.4.",
-  ].join("\n");
+    "",
+    "Rules:",
+    "- Pick the ONE primary product being viewed (not recommendations).",
+    "- name = the product title as sold; searchTerm = brand + model/variant for web research.",
+    "- If a clear product title exists (even with noisy extras), confidence MUST be >= 0.7.",
+    "- Only set confidence < 0.45 for home feeds, category grids, or search result lists with many products.",
+    "- Never invent a product that is not supported by the text.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const msg = await client.messages.create({
     model: config.anthropicModel,
