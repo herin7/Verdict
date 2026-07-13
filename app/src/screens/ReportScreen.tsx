@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   LayoutAnimation,
-  Linking,
   ScrollView,
   Share,
   StyleSheet,
@@ -31,6 +30,7 @@ import {
 } from "../components/InsightContent";
 import { colors, font, fonts, goldGradient, radius, verdictColor, verdictGradient, verdictLabel } from "../theme";
 import { findBuyLinks, getInsight } from "../api/client";
+import { openRetailer } from "../deeplink";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
 
 const FAKE_SIGNAL_COLOR: Record<ConsensusReport["fakeReviewSignal"]["level"], string> = {
@@ -191,7 +191,7 @@ export function ReportScreen({
                 {sorted.map((b, i) => (
                   <Tappable
                     key={i}
-                    onPress={() => Linking.openURL(b.url)}
+                    onPress={() => openRetailer(b.url)}
                     style={[styles.buyRow, i === 0 && styles.sourceRowFirst]}
                   >
                     <Favicon url={b.url} size={26} />
@@ -357,7 +357,7 @@ export function ReportScreen({
           {report.sources.map((s, i) => (
             <Tappable
               key={i}
-              onPress={() => Linking.openURL(s.url)}
+              onPress={() => openRetailer(s.url)}
               style={[styles.sourceRow, i === 0 && styles.sourceRowFirst]}
             >
               <Favicon url={s.url} size={22} />
@@ -544,7 +544,7 @@ function ExpandableAlternatives({
               {st?.links && st.links.length > 0 && (
                 <View style={{ marginTop: 8, gap: 6 }}>
                   {sortByPrice(st.links).map((b, j) => (
-                    <Tappable key={j} onPress={() => Linking.openURL(b.url)} style={styles.altBuyRow}>
+                    <Tappable key={j} onPress={() => openRetailer(b.url)} style={styles.altBuyRow}>
                       <Favicon url={b.url} size={16} />
                       <Text style={styles.altBuyText} numberOfLines={1}>
                         {b.retailer}

@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "../components/Tappable";
-import { colors, fonts, radius } from "../theme";
+import { PillButton } from "../components/ui";
+import { colors, fonts, radius, space } from "../theme";
 import { WATCHED_SHOPPING_APPS } from "../overlayApps";
+import { detectCountry, getCountry, setCountry, type Country } from "../country";
 import {
   canDrawOverlays,
   hideBubble,
@@ -22,6 +24,11 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
   const [overlayOk, setOverlayOk] = useState(false);
   const [a11yOn, setA11yOn] = useState(false);
   const [bubbleOn, setBubbleOn] = useState(false);
+  const [country, setCountryState] = useState<Country>(detectCountry());
+
+  useEffect(() => {
+    getCountry().then(setCountryState).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -34,6 +41,11 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
     const poll = setInterval(refresh, 2000);
     return () => clearInterval(poll);
   }, []);
+
+  const onSelectCountry = async (next: Country) => {
+    setCountryState(next);
+    await setCountry(next);
+  };
 
   if (Platform.OS !== "android") {
     return (
@@ -114,6 +126,26 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
             }}
           />
         )}
+
+        <View style={styles.divider} />
+
+        <Text style={styles.sectionTitle}>Country</Text>
+        <Text style={styles.disclosure}>
+          Prices and marketplaces follow this. Auto from device locale; override anytime.
+        </Text>
+        <View style={styles.countryRow}>
+          <PillButton
+            label="India (₹)"
+            active={country === "IN"}
+            onPress={() => onSelectCountry("IN")}
+          />
+          <PillButton
+            label="United States ($)"
+            active={country === "US"}
+            onPress={() => onSelectCountry("US")}
+          />
+        </View>
+        <Text style={styles.rowSub}>Detected locale default: {detectCountry()}</Text>
 
         <View style={styles.divider} />
 
@@ -241,6 +273,7 @@ const styles = StyleSheet.create({
   },
   actionText: { fontFamily: fonts.sansBold, fontSize: 12, color: colors.onAccent },
   divider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 8 },
+  countryRow: { flexDirection: "row", flexWrap: "wrap", gap: space(2) },
   appList: { gap: 8 },
   appRow: {
     flexDirection: "row",

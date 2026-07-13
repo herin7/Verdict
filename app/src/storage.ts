@@ -6,6 +6,7 @@ const MAX_SAVED = 200;
 const ONBOARDING_KEY = "verdict.onboarding.done.v1";
 const SCAN_COUNT_KEY = "verdict.scanCount.v1";
 const PAYMENT_KEY = "verdict.paymentMethods.v1";
+const COUNTRY_KEY = "verdict.country.v1";
 
 export function makeReportId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -70,4 +71,16 @@ export async function getLocalPaymentMethods(): Promise<string[]> {
 
 export async function setLocalPaymentMethods(methods: string[]): Promise<void> {
   await AsyncStorage.setItem(PAYMENT_KEY, JSON.stringify(methods));
+}
+
+export async function getCountryOverride(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(COUNTRY_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setCountryOverride(country: string): Promise<void> {
+  await AsyncStorage.setItem(COUNTRY_KEY, country);
 }
