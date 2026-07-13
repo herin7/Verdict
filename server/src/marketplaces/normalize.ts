@@ -17,9 +17,12 @@ export interface MarketplaceOffer {
 
 const PRICE_NUM_RE = /([\d,]+(?:\.\d{1,2})?)/;
 
-export function parsePrice(raw: string | null | undefined): { amount: number | null; currency: string } {
-  if (!raw) return { amount: null, currency: "INR" };
-  const currency = /\$|USD/i.test(raw) ? "USD" : "INR";
+export function parsePrice(
+  raw: string | null | undefined,
+  defaultCurrency: string = "INR"
+): { amount: number | null; currency: string } {
+  if (!raw) return { amount: null, currency: defaultCurrency };
+  const currency = /\$|USD/i.test(raw) ? "USD" : /₹|Rs\.?|INR/i.test(raw) ? "INR" : defaultCurrency;
   const m = raw.replace(/,/g, "").match(PRICE_NUM_RE);
   if (!m) return { amount: null, currency };
   const amount = Number(m[1]);
@@ -86,6 +89,7 @@ export function normalizeOffer(input: {
   title: string;
   priceRaw?: string | null;
   currency?: string | null;
+  defaultCurrency?: string | null;
   shipping?: string | null;
   deliveryEstimate?: string | null;
   inStock?: boolean | null;
@@ -94,7 +98,7 @@ export function normalizeOffer(input: {
   matchScore: number;
   matchReason: string;
 }): MarketplaceOffer {
-  const parsed = parsePrice(input.priceRaw ?? null);
+  const parsed = parsePrice(input.priceRaw ?? null, input.defaultCurrency ?? "INR");
   return {
     retailer: input.retailer,
     retailerId: input.retailerId,

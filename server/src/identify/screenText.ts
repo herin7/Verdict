@@ -3,6 +3,8 @@
  * Keeps product-signal strings, drops chrome/nav chrome.
  */
 
+import { normalizeCountry, priceRegexFor, type Country } from "../marketplaces/registry.js";
+
 const CHROME = [
   /^search amazon/i,
   /^search flipkart/i,
@@ -64,10 +66,10 @@ const CHROME = [
   /^emi/i,
   /^₹\s*$/,
   /^rs\.?\s*$/i,
+  /^\$\s*$/,
 ];
 
 const ASIN_RE = /\b(B0[A-Z0-9]{8})\b/i;
-const PRICE_RE = /(?:₹|Rs\.?\s*|INR\s*)[\d,]+(?:\.\d{1,2})?/i;
 
 function isChrome(token: string): boolean {
   const t = token.trim();
@@ -77,30 +79,31 @@ function isChrome(token: string): boolean {
 }
 
 /** Split a flat a11y dump into tokens, drop chrome, dedupe, keep signal. */
-export function cleanScreenText(raw: string): {
+export function cleanScreenText(
+  raw: string,
+  country: Country | string = "IN"
+): {
   cleaned: string;
   asin: string | null;
   priceHint: string | null;
 } {
+  const c = normalizeCountry(country);
+  const priceRe = priceRegexFor(c);
   const asin = raw.match(ASIN_RE)?.[1]?.toUpperCase() ?? null;
-  const priceHint = raw.match(PRICE_RE)?.[0] ?? null;
+  const priceHint = raw.match(priceRe)?.[0] ?? null;
 
-  // Prefer newline/pipe splits if present; else split on multi-space.
   const parts = raw
     .split(/[\n\r|•·]+|(?:\s{2,})/)
     .map((p) => p.trim())
     .filter(Boolean);
 
-  // Flat dumps often have no separators — also split by common join points
-  // by re-tokenizing long blobs on sentence-ish boundaries when few parts.
   let tokens = parts;
   if (parts.length < 4 && raw.length > 80) {
     tokens = raw
-      .split(/(?<=[.!?])\s+|(?<=\) )\s*(?=[A-Z₹])|\s{2,}/)
+      .split(/(?<=[.!?])\s+|(?<=\) )\s*(?=[A-Z₹$])|\s{2,}/)
       .map((p) => p.trim())
       .filter(Boolean);
     if (tokens.length < 3) {
-      // Last resort: keep whole string as one token after light chrome strip
       tokens = [raw.trim()];
     }
   }
@@ -116,11 +119,10 @@ export function cleanScreenText(raw: string): {
     if (kept.length >= 80) break;
   }
 
-  // Rank: longer unique strings first (likely product title), then rest
   const ranked = [...kept].sort((a, b) => {
     const score = (s: string) => {
       let n = Math.min(s.length, 160);
-      if (PRICE_RE.test(s)) n += 20;
+      if (priceRe.test(s)) n += 20;
       if (/^[A-Z]/.test(s) && s.length > 25) n += 30;
       if (ASIN_RE.test(s)) n += 40;
       return n;
