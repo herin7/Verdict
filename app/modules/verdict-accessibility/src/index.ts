@@ -32,6 +32,26 @@ export function getLastPackageName(): string | null {
   return Native?.getLastPackageName?.() ?? null;
 }
 
+/** Fresh a11y dump of the current foreground window (for bubble tap). */
+export function getCurrentScreenText(): {
+  text: string | null;
+  packageName: string | null;
+  isProductPage?: boolean;
+} {
+  const raw = Native?.captureNow?.();
+  if (!raw || typeof raw !== "object") {
+    return {
+      text: getLastScreenText(),
+      packageName: getLastPackageName(),
+    };
+  }
+  return {
+    text: (raw.text as string | null) ?? null,
+    packageName: (raw.packageName as string | null) ?? null,
+    isProductPage: Boolean(raw.isProductPage),
+  };
+}
+
 /**
  * Restricts what the accessibility service will ever read to this list of
  * package names. Everything else (personal apps, banking, messaging, etc.)
@@ -41,10 +61,14 @@ export function setWatchlist(packages: string[]): void {
   Native?.setWatchlist?.(packages);
 }
 
-export function addScreenTextListener(cb: (text: string, packageName: string) => void): Sub {
+export function addScreenTextListener(
+  cb: (text: string, packageName: string, isProductPage?: boolean) => void
+): Sub {
   if (!Native?.addListener) return noopSub();
-  return Native.addListener("onScreenText", (p: { text: string; packageName: string }) =>
-    cb(p.text, p.packageName)
+  return Native.addListener(
+    "onScreenText",
+    (p: { text: string; packageName: string; isProductPage?: boolean }) =>
+      cb(p.text, p.packageName, p.isProductPage)
   );
 }
 

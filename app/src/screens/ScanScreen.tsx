@@ -114,7 +114,7 @@ export function ScanScreen({
     }
   }, [initialUrl]);
 
-  if (!permission && stage !== "paste" && stage !== "identifying" && stage !== "confirm") {
+  if (!permission && stage !== "paste" && stage !== "identifying" && stage !== "confirm" && stage !== "identifyFailed" && stage !== "researching") {
     return (
       <Center>
         <ActivityIndicator color={colors.accent} />
@@ -122,7 +122,15 @@ export function ScanScreen({
     );
   }
 
-  if (permission && !permission.granted && stage !== "paste" && stage !== "identifying" && stage !== "confirm" && stage !== "researching") {
+  if (
+    permission &&
+    !permission.granted &&
+    stage !== "paste" &&
+    stage !== "identifying" &&
+    stage !== "confirm" &&
+    stage !== "identifyFailed" &&
+    stage !== "researching"
+  ) {
     return (
       <Center>
         <Ionicons name="camera-outline" size={40} color={colors.textMuted} />

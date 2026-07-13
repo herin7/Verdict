@@ -1,7 +1,7 @@
 {
   "name": "verdict-overlay",
   "version": "1.0.0",
-  "description": "Custom Android floating bubble + MediaProjection capture for Verdict",
+  "description": "Custom Android floating bubble for Verdict shopping overlay",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {},

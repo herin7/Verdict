@@ -1,14 +1,17 @@
 package expo.modules.verdictaccessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
  * Read-only text extraction, gated to a caller-supplied watchlist of shopping
- * app package names. No performAction / gestures / global actions, and no
- * text is ever collected for packages outside the watchlist - so personal
- * apps (messaging, banking, gallery, etc.) are never read, by construction.
+ * app package names. No performAction / gestures / global actions.
  */
 class VerdictAccessibilityService : AccessibilityService() {
   companion object {
@@ -18,68 +21,293 @@ class VerdictAccessibilityService : AccessibilityService() {
     @Volatile var watchlist: Set<String> = emptySet()
     @Volatile private var lastEmittedTextHash: Int = 0
     @Volatile private var wasInWatchedApp = false
+    @Volatile private var lastHot = false
+    @Volatile private var instance: VerdictAccessibilityService? = null
+
+    private const val LEAVE_DEBOUNCE_MS = 1500L
+
+    /**
+     * Amazon/Flipkart PDPs fire WINDOW_CONTENT_CHANGED many times per second
+     * while a list/image loads. Without a floor here, every event re-walks
+     * the tree and re-signals hot/idle, which cancels the pulse animation
+     * mid-flight before it can ever play (looked "frozen").
+     */
+    private const val MIN_CAPTURE_INTERVAL_MS = 200L
+
+    /** Transient packages that should not count as "left shopping". */
+    private val IGNORE_LEAVE = setOf(
+      "com.android.systemui",
+      "com.android.launcher",
+      "com.android.launcher3",
+      "com.google.android.apps.nexuslauncher",
+      "com.oppo.launcher",
+      "com.oplus.launcher",
+      "net.oneplus.launcher",
+      "com.coloros.launcher",
+      "com.android.permissioncontroller",
+      "com.google.android.permissioncontroller",
+      "com.google.android.packageinstaller",
+      "com.android.packageinstaller",
+      "com.google.android.inputmethod.latin",
+      "com.android.inputmethod.latin",
+      "com.samsung.android.honeyboard",
+      "com.google.android.apps.accessibility.voiceaccess",
+      "com.android.settings",
+    )
+
+    private val CHROME = listOf(
+      "search amazon", "search flipkart", "deliver to", "hello,",
+      "sign in", "your orders", "returns & orders", "skip to",
+      "add to cart", "buy now", "sponsored", "see all", "view all",
+      "customers who", "frequently bought", "related products",
+      "today's deals", "best sellers", "join prime",
+    )
+
+    /** Fresh walk of the active window tree. Used on bubble tap. */
+    @JvmStatic
+    fun captureNow(): Map<String, Any?> {
+      val svc = instance ?: return mapOf(
+        "text" to lastText,
+        "packageName" to lastPackage,
+        "isProductPage" to lastHot,
+      )
+      return svc.doCapture(forceEmit = false)
+    }
   }
+
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var leaveRunnable: Runnable? = null
+  private var pendingCaptureRunnable: Runnable? = null
+  private var pendingCapturePkg: String? = null
+  private var lastCaptureAt = 0L
 
   override fun onServiceConnected() {
     enabled = true
+    instance = this
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) return
     val pkg = event.packageName?.toString() ?: return
     if (pkg == packageName) return
+    if (shouldIgnoreLeave(pkg)) return
 
     if (watchlist.isEmpty() || !watchlist.contains(pkg)) {
-      if (wasInWatchedApp) {
-        wasInWatchedApp = false
-        VerdictAccessibilityBridge.emit("onLeftShoppingApp", emptyMap())
-      }
+      scheduleLeave()
       return
     }
 
-    val root = rootInActiveWindow ?: return
-    val sb = StringBuilder()
-    collectText(root, sb, 0)
-    val text = sb.toString().trim()
-    if (text.length < 8) return
+    cancelLeave()
+    throttledCapture(pkg)
+  }
 
-    lastText = text.take(4000)
+  /** Leading-edge throttle with a trailing call so bursts collapse to ~1 capture per window. */
+  private fun throttledCapture(pkg: String) {
+    val now = SystemClock.uptimeMillis()
+    val elapsed = now - lastCaptureAt
+    if (elapsed >= MIN_CAPTURE_INTERVAL_MS) {
+      lastCaptureAt = now
+      doCapture(forceEmit = true, eventPkg = pkg)
+      return
+    }
+    pendingCapturePkg = pkg
+    if (pendingCaptureRunnable != null) return
+    val r = Runnable {
+      pendingCaptureRunnable = null
+      lastCaptureAt = SystemClock.uptimeMillis()
+      doCapture(forceEmit = true, eventPkg = pendingCapturePkg)
+    }
+    pendingCaptureRunnable = r
+    mainHandler.postDelayed(r, MIN_CAPTURE_INTERVAL_MS - elapsed)
+  }
+
+  private fun cancelPendingCapture() {
+    pendingCaptureRunnable?.let { mainHandler.removeCallbacks(it) }
+    pendingCaptureRunnable = null
+  }
+
+  private fun shouldIgnoreLeave(pkg: String): Boolean {
+    if (IGNORE_LEAVE.contains(pkg)) return true
+    if (pkg.endsWith(".inputmethod.latin")) return true
+    if (pkg.contains("launcher", ignoreCase = true)) return true
+    if (pkg.contains("systemui", ignoreCase = true)) return true
+    return false
+  }
+
+  private fun scheduleLeave() {
+    if (!wasInWatchedApp) return
+    if (leaveRunnable != null) return
+    val r = Runnable {
+      leaveRunnable = null
+      if (wasInWatchedApp) {
+        wasInWatchedApp = false
+        cancelPendingCapture()
+        lastHot = false
+        signalBubbleHot(false)
+        signalBubbleVisible(false)
+        VerdictAccessibilityBridge.emit("onLeftShoppingApp", emptyMap())
+        android.util.Log.i("VerdictA11y", "left shopping (debounced)")
+      }
+    }
+    leaveRunnable = r
+    mainHandler.postDelayed(r, LEAVE_DEBOUNCE_MS)
+  }
+
+  private fun cancelLeave() {
+    leaveRunnable?.let { mainHandler.removeCallbacks(it) }
+    leaveRunnable = null
+  }
+
+  private fun doCapture(forceEmit: Boolean, eventPkg: String? = null): Map<String, Any?> {
+    val root = rootInActiveWindow
+    if (root == null) {
+      return mapOf(
+        "text" to lastText,
+        "packageName" to lastPackage,
+        "isProductPage" to lastHot,
+      )
+    }
+    val pkg = eventPkg
+      ?: root.packageName?.toString()
+      ?: lastPackage
+      ?: "unknown"
+
+    val tokens = LinkedHashSet<String>()
+    collectText(root, tokens, 0)
+    if (tokens.size < 2 && tokens.sumOf { it.length } < 8) {
+      return mapOf(
+        "text" to lastText,
+        "packageName" to lastPackage,
+        "isProductPage" to lastHot,
+      )
+    }
+
+    val text = tokens.joinToString("\n").take(4000)
+    val enteringFresh = !wasInWatchedApp
+    lastText = text
     lastPackage = pkg
     wasInWatchedApp = true
 
-    // De-dupe: accessibility fires repeatedly for the same screen (scroll,
-    // focus changes, etc). Only emit when the extracted text actually changed.
-    val hash = lastText.hashCode()
-    if (hash == lastEmittedTextHash) return
-    lastEmittedTextHash = hash
+    if (enteringFresh) signalBubbleVisible(true)
 
-    VerdictAccessibilityBridge.emit(
-      "onScreenText",
-      mapOf("text" to lastText, "packageName" to pkg)
+    val hot = ScreenProductHeuristic.isProductPage(text, pkg)
+    android.util.Log.i(
+      "VerdictA11y",
+      "pdp=$hot pkg=$pkg tokens=${tokens.size} preview=${text.take(120).replace('\n', '|')}"
+    )
+    // Drive hot signal only on real transitions (not gated on text-hash, so a
+    // borderline page that flips to a PDP still pulses) — but never re-fire
+    // on every event, or the pulse animation gets cancelled before it plays.
+    if (hot != lastHot) {
+      lastHot = hot
+      signalBubbleHot(hot)
+    }
+
+    val hash = text.hashCode()
+    if (forceEmit && hash != lastEmittedTextHash) {
+      lastEmittedTextHash = hash
+      VerdictAccessibilityBridge.emit(
+        "onScreenText",
+        mapOf(
+          "text" to lastText,
+          "packageName" to pkg,
+          "isProductPage" to hot,
+        )
+      )
+    }
+
+    return mapOf(
+      "text" to text,
+      "packageName" to pkg,
+      "isProductPage" to hot,
     )
   }
 
-  private fun collectText(node: AccessibilityNodeInfo?, out: StringBuilder, depth: Int) {
-    if (node == null || depth > 40) return
-    val t = node.text?.toString()?.trim()
-    if (!t.isNullOrEmpty()) {
-      if (out.isNotEmpty()) out.append(' ')
-      out.append(t)
+  private fun signalBubbleHot(hot: Boolean) {
+    android.util.Log.i("VerdictA11y", "signalBubbleHot=$hot pkg=$lastPackage len=${lastText?.length}")
+    try {
+      val clazz = Class.forName("expo.modules.verdictoverlay.VerdictOverlayService")
+      clazz.getMethod("requestHot", java.lang.Boolean.TYPE).invoke(null, hot)
+      return
+    } catch (e: Exception) {
+      android.util.Log.w("VerdictA11y", "requestHot reflect failed: ${e.message}")
     }
-    val cd = node.contentDescription?.toString()?.trim()
-    if (!cd.isNullOrEmpty() && cd != t) {
-      if (out.isNotEmpty()) out.append(' ')
-      out.append(cd)
+    startOverlayAction(if (hot) "verdict.overlay.HOT" else "verdict.overlay.IDLE", preferFgs = hot)
+  }
+
+  private fun signalBubbleVisible(show: Boolean) {
+    try {
+      val clazz = Class.forName("expo.modules.verdictoverlay.VerdictOverlayService")
+      if (show) {
+        clazz.getMethod("requestShow").invoke(null)
+      } else {
+        clazz.getMethod("requestHide").invoke(null)
+      }
+      return
+    } catch (e: Exception) {
+      android.util.Log.w("VerdictA11y", "requestShow/Hide reflect failed: ${e.message}")
     }
-    for (i in 0 until node.childCount) {
-      collectText(node.getChild(i), out, depth + 1)
+    startOverlayAction(
+      if (show) "verdict.overlay.SHOW" else "verdict.overlay.HIDE_BUBBLE",
+      preferFgs = show
+    )
+  }
+
+  private fun startOverlayAction(action: String, preferFgs: Boolean) {
+    try {
+      val intent = Intent().setClassName(
+        packageName,
+        "expo.modules.verdictoverlay.VerdictOverlayService"
+      )
+      intent.action = action
+      if (preferFgs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        startForegroundService(intent)
+      } else {
+        startService(intent)
+      }
+    } catch (e: Exception) {
+      android.util.Log.w("VerdictA11y", "overlay action $action failed: ${e.message}")
     }
+  }
+
+  private fun collectText(node: AccessibilityNodeInfo?, out: LinkedHashSet<String>, depth: Int) {
+    if (node == null || depth > 45) return
+    try {
+      addToken(out, node.text?.toString())
+      addToken(out, node.contentDescription?.toString())
+      if (Build.VERSION.SDK_INT >= 26) {
+        addToken(out, node.hintText?.toString())
+      }
+      if (out.size >= 120) return
+      for (i in 0 until node.childCount) {
+        if (out.size >= 120) return
+        val child = node.getChild(i)
+        collectText(child, out, depth + 1)
+        try {
+          child?.recycle()
+        } catch (_: Exception) {
+        }
+      }
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun addToken(out: LinkedHashSet<String>, raw: String?) {
+    val t = raw?.trim() ?: return
+    if (t.length < 2 || t.length > 300) return
+    val lower = t.lowercase()
+    if (CHROME.any { lower.startsWith(it) || lower == it }) return
+    if (t.length <= 4 && t.matches(Regex("""^\d+(\.\d+)?$"""))) return
+    out.add(t)
   }
 
   override fun onInterrupt() {}
 
   override fun onDestroy() {
+    cancelLeave()
+    cancelPendingCapture()
     enabled = false
+    if (instance === this) instance = null
     super.onDestroy()
   }
 }
