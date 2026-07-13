@@ -62,3 +62,53 @@ export async function callToolIdentifyFromText(ctx: {
   const coerced = coerceToSchema(ProductIdentitySchema, normalized);
   return ProductIdentitySchema.parse(coerced);
 }
+
+/** Identify a product from raw accessibility-extracted screen text (no URL). */
+export async function callToolIdentifyFromScreenText(ctx: {
+  text: string;
+  packageName: string;
+}): Promise<ProductIdentity> {
+  const tool: Anthropic.Tool = {
+    name: "report_product",
+    description: "Identify the shoppable product from on-screen text extracted from a shopping app.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        brand: { type: ["string", "null"] },
+        category: { type: "string" },
+        model: { type: ["string", "null"] },
+        confidence: { type: "number" },
+        searchTerm: { type: "string" },
+      },
+      required: ["name", "category", "confidence", "searchTerm"],
+    },
+  };
+
+  const prompt = [
+    `Source app package: ${ctx.packageName}`,
+    `On-screen text (accessibility extraction, may be noisy/out of order):`,
+    ctx.text.slice(0, 3000),
+    "Identify the single commercial product being viewed so it can be researched for a buying decision.",
+    "If no clear product is present, set confidence below 0.4.",
+  ].join("\n");
+
+  const msg = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 512,
+    tools: [tool],
+    tool_choice: { type: "tool", name: "report_product", disable_parallel_tool_use: true },
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const toolBlock = msg.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+  if (!toolBlock) throw new Error("LLM identify-from-screen-text returned no tool call");
+
+  const normalized = {
+    brand: null,
+    model: null,
+    ...(toolBlock.input as Record<string, unknown>),
+  };
+  const coerced = coerceToSchema(ProductIdentitySchema, normalized);
+  return ProductIdentitySchema.parse(coerced);
+}
