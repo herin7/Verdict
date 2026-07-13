@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import { authPlugin } from "./auth/plugin.js";
 import { identifyRoute } from "./routes/identify.js";
 import { identifyUrlRoute } from "./routes/identifyUrl.js";
+import { identifyScreenRoute } from "./routes/identifyScreen.js";
 import { researchRoute } from "./routes/research.js";
 import { buyLinkRoute } from "./routes/buyLink.js";
 import { insightsRoute } from "./routes/insights.js";
@@ -48,6 +49,7 @@ await app.register(rateLimit, {
 await app.register(authPlugin);
 await app.register(identifyRoute);
 await app.register(identifyUrlRoute);
+await app.register(identifyScreenRoute);
 await app.register(researchRoute);
 await app.register(buyLinkRoute);
 await app.register(insightsRoute);

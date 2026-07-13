@@ -60,9 +60,11 @@ On a physical device set `EXPO_PUBLIC_API_URL` to your machine's LAN IP, e.g. `E
 
 ### Overlay detection priority (Android)
 
-1. Share Intent from shopping app (zero extra permission)
-2. Bubble tap -> one-shot MediaProjection screenshot -> Claude vision identify
-3. Optional AccessibilityService text read (off by default, explicit disclosure)
+1. Accessibility reading (watchlist-gated shopping apps only) - auto-shows bubble, no casting
+2. Bubble tap -> identify from on-screen text via `/identify-screen` (no MediaProjection)
+3. Share Intent from shopping app (zero extra permission)
+
+Personal apps are never read. Requires Accessibility + Display-over-apps permissions.
 
 iOS floating overlay is not supported by Apple; deferred.
 

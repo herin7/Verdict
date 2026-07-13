@@ -76,3 +76,18 @@ export function validateProductUrl(raw: string): string {
   }
   return url.toString();
 }
+
+const MIN_SCREEN_TEXT_LEN = 8;
+const MAX_SCREEN_TEXT_LEN = 6000;
+
+/** Pure length/shape check on accessibility-extracted screen text - no network. */
+export function validateScreenText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length < MIN_SCREEN_TEXT_LEN) {
+    throw new ValidationError("Screen text too short to identify a product", {
+      rejectReason: "not_a_product",
+      code: "text_too_short",
+    });
+  }
+  return trimmed.slice(0, MAX_SCREEN_TEXT_LEN);
+}

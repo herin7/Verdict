@@ -155,6 +155,14 @@ export async function identifyUrl(url: string): Promise<{
   return json;
 }
 
+export async function identifyScreen(text: string, packageName: string): Promise<ProductIdentity> {
+  const json = await api<{ product: ProductIdentity }>("/identify-screen", {
+    method: "POST",
+    body: JSON.stringify({ text, packageName }),
+  });
+  return json.product;
+}
+
 export async function compareEverywhere(product: ProductIdentity, gtin?: string | null) {
   return api<{
     offers: import("../types").MarketplaceOffer[];
