@@ -4,6 +4,7 @@ import { requireAuth } from "../auth/plugin.js";
 import { rejectIfBanned } from "../guard/preHandler.js";
 import { ProductIdentitySchema } from "../schema.js";
 import { compareProduct } from "../services/compare.js";
+import { normalizeCountry } from "../marketplaces/registry.js";
 
 const BodySchema = z.object({
   product: ProductIdentitySchema.partial({
@@ -15,6 +16,7 @@ const BodySchema = z.object({
     name: z.string().min(1),
   }),
   gtin: z.string().nullable().optional(),
+  country: z.enum(["IN", "US"]).optional(),
 });
 
 export async function compareRoute(app: FastifyInstance) {
@@ -27,6 +29,7 @@ export async function compareRoute(app: FastifyInstance) {
         return reply.code(400).send({ error: "product.name is required" });
       }
       const p = parsed.data.product;
+      const country = normalizeCountry(parsed.data.country);
       const product = {
         name: p.name,
         brand: p.brand ?? null,
@@ -36,11 +39,15 @@ export async function compareRoute(app: FastifyInstance) {
         searchTerm: p.searchTerm ?? p.name,
       };
       try {
-        const result = await compareProduct(product, { gtin: parsed.data.gtin ?? null });
+        const result = await compareProduct(product, {
+          gtin: parsed.data.gtin ?? null,
+          country,
+        });
         return {
           offers: result.offers,
           productId: result.productId,
           cached: result.cached,
+          country,
         };
       } catch (err) {
         req.log.error(err);

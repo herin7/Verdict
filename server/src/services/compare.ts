@@ -1,5 +1,12 @@
 import type { ProductIdentity } from "../schema.js";
-import { MARKETPLACES, findMarketplace } from "../marketplaces/registry.js";
+import {
+  currencyFor,
+  findMarketplace,
+  marketplacesFor,
+  normalizeCountry,
+  priceRegexFor,
+  type Country,
+} from "../marketplaces/registry.js";
 import { matchScore, normalizeOffer, type MarketplaceOffer } from "../marketplaces/normalize.js";
 import { CreditTracker, orchestratedExtract, orchestratedSearchMany } from "../providers/orchestrator.js";
 import { findOrCreateProduct } from "./../repositories/products.js";
@@ -18,16 +25,17 @@ export interface CompareResult {
 
 export async function compareProduct(
   product: ProductIdentity,
-  opts: { gtin?: string | null } = {}
+  opts: { gtin?: string | null; country?: Country | string | null } = {}
 ): Promise<CompareResult> {
-  const fp = productFingerprint(product);
+  const country = normalizeCountry(opts.country);
+  const fp = `${productFingerprint(product)}:${country}`;
   const existing = inflight.get(fp);
   if (existing) {
     const offers = await existing;
     return { offers, productId: null, cached: true };
   }
 
-  const promise = executeCompare(product, opts.gtin ?? null);
+  const promise = executeCompare(product, opts.gtin ?? null, country);
   inflight.set(fp, promise.then((r) => r.offers));
   try {
     return await promise;
@@ -38,7 +46,8 @@ export async function compareProduct(
 
 async function executeCompare(
   product: ProductIdentity,
-  gtin: string | null
+  gtin: string | null,
+  country: Country
 ): Promise<CompareResult> {
   let productId: string | null = null;
 
@@ -48,14 +57,18 @@ async function executeCompare(
       productId = row.id;
       const cached = await getFreshOffers(row.id);
       if (cached && cached.length > 0) {
-        return { offers: cached, productId, cached: true };
+        const currency = currencyFor(country);
+        const filtered = cached.filter((o) => !o.currency || o.currency === currency);
+        if (filtered.length > 0) {
+          return { offers: filtered, productId, cached: true };
+        }
       }
     } catch (err) {
       console.warn("[compare] cache read failed:", (err as Error).message);
     }
   }
 
-  const offers = await liveCompare(product, gtin);
+  const offers = await liveCompare(product, gtin, country);
 
   if (productId && offers.length > 0) {
     await upsertOffers(productId, offers).catch((err) =>
@@ -66,13 +79,19 @@ async function executeCompare(
   return { offers, productId, cached: false };
 }
 
-async function liveCompare(product: ProductIdentity, gtin: string | null): Promise<MarketplaceOffer[]> {
+async function liveCompare(
+  product: ProductIdentity,
+  gtin: string | null,
+  country: Country
+): Promise<MarketplaceOffer[]> {
   const tracker = new CreditTracker();
   const term = product.searchTerm || product.name;
   const brand = product.brand ? ` ${product.brand}` : "";
+  const list = marketplacesFor(country);
+  const defaultCurrency = currencyFor(country);
+  const priceRe = priceRegexFor(country);
 
-  // Prioritize top marketplaces with targeted site queries
-  const priority = MARKETPLACES.slice(0, 10);
+  const priority = list.slice(0, 10);
   const tasks = priority.map((m) => ({
     type: m.id,
     prompt: `site:${m.domains[0]} ${term}${brand}${product.model ? ` ${product.model}` : ""} buy price`,
@@ -84,7 +103,7 @@ async function liveCompare(product: ProductIdentity, gtin: string | null): Promi
 
   for (const g of grouped) {
     for (const r of g.results.slice(0, 2)) {
-      const m = findMarketplace(r.url);
+      const m = findMarketplace(r.url, country);
       if (!m) continue;
       candidates.push({
         url: r.url,
@@ -95,7 +114,6 @@ async function liveCompare(product: ProductIdentity, gtin: string | null): Promi
     }
   }
 
-  // Deduplicate by host+path
   const seen = new Set<string>();
   const unique = candidates.filter((c) => {
     try {
@@ -109,11 +127,10 @@ async function liveCompare(product: ProductIdentity, gtin: string | null): Promi
     }
   });
 
-  // Enrich top candidates with structured extract (cap to control cost)
   const top = unique.slice(0, 8);
   const enriched = await Promise.all(
     top.map(async (c) => {
-      const m = MARKETPLACES.find((x) => x.id === c.marketplaceId)!;
+      const m = list.find((x) => x.id === c.marketplaceId)!;
       const structured = await orchestratedExtract(c.url).catch(() => null);
       const title = structured?.title || c.title;
       const match = matchScore({
@@ -129,7 +146,7 @@ async function liveCompare(product: ProductIdentity, gtin: string | null): Promi
 
       const priceRaw =
         structured?.price ||
-        c.snippet.match(/(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{1,2})?/i)?.[0] ||
+        c.snippet.match(priceRe)?.[0] ||
         null;
 
       return normalizeOffer({
@@ -139,6 +156,7 @@ async function liveCompare(product: ProductIdentity, gtin: string | null): Promi
         title,
         priceRaw,
         currency: structured?.currency ?? null,
+        defaultCurrency,
         seller: structured?.seller ?? null,
         inStock: structured?.inStock ?? null,
         matchScore: match.score,
