@@ -1,5 +1,5 @@
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
-import { Pressable, type GestureResponderEvent, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, type GestureResponderEvent, type Insets, type StyleProp, type ViewStyle } from "react-native";
 import { motion } from "../theme";
 
 export function Tappable({
@@ -7,11 +7,16 @@ export function Tappable({
   onPress,
   style,
   disabled,
+  accessibilityLabel,
+  hitSlop,
 }: {
   children: React.ReactNode;
   onPress?: (e: GestureResponderEvent) => void;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  accessibilityLabel?: string;
+  /** Expands the touch target without changing visual size - use to meet the ~44x44dp minimum on compact controls. */
+  hitSlop?: Insets | number;
 }) {
   const scale = useSharedValue(1);
   const anim = useAnimatedStyle(() => ({
@@ -23,6 +28,8 @@ export function Tappable({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityLabel={accessibilityLabel}
+      hitSlop={hitSlop}
       onPressIn={() => {
         scale.value = withSpring(0.96, motion.spring);
       }}
