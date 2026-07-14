@@ -51,6 +51,10 @@ export const config = {
   anakinBaseUrl: "https://api.anakin.io/v1",
   firecrawlApiKey: optional("FIRECRAWL_API_KEY"),
   firecrawlBaseUrl: "https://api.firecrawl.dev/v2",
+  /** Public base URL of this server (used to register Firecrawl monitor webhooks). Unset = no auto webhook URL. */
+  publicBaseUrl: optional("PUBLIC_BASE_URL"),
+  /** Shared secret for POST /webhooks/firecrawl. Unset = webhook route rejects all calls. */
+  firecrawlWebhookSecret: optional("FIRECRAWL_WEBHOOK_SECRET"),
 
   databaseUrl: optional("DATABASE_URL"),
   supabaseUrl: optional("SUPABASE_URL"),
@@ -68,6 +72,13 @@ export const config = {
   authEnabled: Boolean(process.env.SUPABASE_JWT_ISSUER?.trim()),
   /** Soft-db mode when Neon not set - cache skipped, pipeline still runs. */
   dbEnabled: Boolean(process.env.DATABASE_URL?.trim()),
+  /**
+   * Shopping Missions require DB persistence. Soft-off when DATABASE_URL unset,
+   * or when MISSIONS_ENABLED=false/0 explicitly.
+   */
+  missionsEnabled:
+    Boolean(process.env.DATABASE_URL?.trim()) &&
+    !["0", "false", "off"].includes((process.env.MISSIONS_ENABLED ?? "true").trim().toLowerCase()),
 
   /** AWS region for Bedrock Converse calls. Unset = Bedrock disabled, only Anthropic runs. */
   bedrockRegion: optional("BEDROCK_REGION"),
@@ -81,4 +92,11 @@ export const config = {
   posthogApiKey: optional("POSTHOG_API_KEY"),
   posthogHost: optional("POSTHOG_HOST", "https://us.i.posthog.com"),
   posthogEnabled: Boolean(process.env.POSTHOG_API_KEY?.trim()),
+
+  /** Wall-clock timeout for Anakin/Firecrawl HTTP (AbortSignal). */
+  providerHttpTimeoutMs: Number(process.env.PROVIDER_HTTP_TIMEOUT_MS) || 20_000,
+  /** Extra attempts after the first for 429/5xx/network/timeout on provider HTTP. */
+  providerHttpRetries: Number(process.env.PROVIDER_HTTP_RETRIES) || 2,
+  /** Anthropic SDK request timeout (ms). */
+  anthropicTimeoutMs: Number(process.env.ANTHROPIC_TIMEOUT_MS) || 90_000,
 };

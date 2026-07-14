@@ -10,6 +10,14 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:deals": "tsx src/deals/calculator.test.ts",
+    "test:registry": "tsx src/marketplaces/registry.test.ts",
+    "test:compare": "tsx src/services/compare.test.ts",
+    "test:ai-gateway": "tsx test/ai-gateway.test.ts",
+    "test:firecrawl-missions": "tsx test/firecrawl-missions.test.ts",
+    "test:http": "tsx test/http-reliability.test.ts",
+    "test:screen-text": "tsx test/screen-text.test.ts",
+    "test:identify-screen": "tsx test/identify-screen.test.ts",
+    "test": "tsx src/deals/calculator.test.ts && tsx src/marketplaces/registry.test.ts && tsx src/services/compare.test.ts && tsx test/ai-gateway.test.ts && tsx test/firecrawl-missions.test.ts && tsx test/http-reliability.test.ts && tsx test/screen-text.test.ts && tsx test/identify-screen.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -25,6 +33,8 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.1",
     "jose": "^6.2.3",
+    "pino": "^10.3.1",
+    "posthog-node": "^5.42.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

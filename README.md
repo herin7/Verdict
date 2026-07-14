@@ -20,11 +20,12 @@ Every scan runs 8 parallel Anakin `Search` calls (one per source type) then an A
 ## Structure
 
 - `server/` - Fastify + TypeScript backend. Holds the API keys, orchestrates the pipeline.
-  - Endpoints: `POST /identify`, `POST /identify-url`, `POST /research`, `POST /compare`, `POST /deals`, `GET/PUT /me/*`, `GET /health`
-  - Anakin-first provider orchestrator with Firecrawl gap-fill
+  - Endpoints: `POST /identify`, `POST /identify-url`, `POST /research`, `POST /compare`, `POST /deals`, `GET|POST /missions*`, `POST /webhooks/firecrawl`, `GET/PUT /me/*`, `GET /health`
+  - Anakin-first provider orchestrator with Firecrawl gap-fill + optional Firecrawl price/stock monitors
+  - Shopping Missions (agent proposes, human approves - never auto-purchase)
   - Compare Everywhere + Personalized Deal Engine (deterministic, no LLM)
   - Pre-flight validation + abuse prevention (IP ban after repeated invalids)
-- `app/` - Expo (React Native, TS) app with camera scan, paste-link, payment profile, compare/deals UI
+- `app/` - Expo (React Native, TS) app with camera scan, paste-link, payment profile, compare/deals UI, missions
   - Android floating overlay (custom native module) + share-intent (requires EAS/dev-client build)
 
 ## AI provider architecture
@@ -36,6 +37,33 @@ All LLM calls (`server/src/claude.ts`) go through one gateway (`server/src/ai/ga
 - `BEDROCK_MODEL_MAP` (JSON env, e.g. `{"identify_screen":"amazon.nova-lite-v1:0"}`) maps workload -> Bedrock model id. A workload with no entry can't run on Bedrock even if listed in `AI_POLICY`.
 
 Anthropic is always the default and last-resort fallback; Bedrock is opt-in per workload. To try Bedrock on one workload: set `BEDROCK_REGION`, add that workload to `BEDROCK_MODEL_MAP`, then add `["bedrock","anthropic"]` for it in `AI_POLICY`. Rollback is deleting/editing that env var, no code change.
+
+## Observability & Analytics
+
+Product analytics (PostHog) and structured logging (pino) are both opt-in and fully disabled by default - unset env vars means zero behavior change.
+
+- Server: `POSTHOG_API_KEY` + `POSTHOG_HOST` (default `https://us.i.posthog.com`). Unset key = client never initializes, `capture()` calls no-op.
+- App: `EXPO_PUBLIC_POSTHOG_API_KEY` + `EXPO_PUBLIC_POSTHOG_HOST`. Unset key = `posthog` is `null`, `track()` calls no-op. No `PostHogProvider`/autocapture - events are only sent from explicit `track()` calls.
+- Every request logs `request_start`/`request_end` (pino, `server/src/logging/logger.ts`) keyed by `requestId`, with route, status, and `latencyMs`.
+- Event naming convention: `domain_action` in snake_case (e.g. `scan_started`, `report_saved`, `ai_provider_call`, `mission_created`). Only send category/count/boolean/enum-level properties - never raw product titles, scraped/screen text, prompts, images, tokens, or secrets.
+
+## Reliability knobs
+
+Optional env (defaults are fine for local/dev):
+
+- `PROVIDER_HTTP_TIMEOUT_MS` (default 20000) - AbortSignal wall-clock on Anakin/Firecrawl HTTP
+- `PROVIDER_HTTP_RETRIES` (default 2) - extra attempts on 429/5xx/network/timeout
+- `ANTHROPIC_TIMEOUT_MS` (default 90000) - Anthropic SDK request timeout
+
+`GET /health` reports config flags plus `dbReachable` (live `SELECT 1` when `DATABASE_URL` set). Returns 503 if DB is configured but unreachable. Firecrawl/missions/PostHog stay soft-off when their keys/flags are unset.
+
+## Shopping Missions & Firecrawl monitors
+
+Missions let the agent research compare/deals and propose an action; you approve or reject. No purchase runs without approval.
+
+- Requires `DATABASE_URL` (apply `server/drizzle/0002_missions_firecrawl.sql`). Set `MISSIONS_ENABLED=false` to force-off.
+- Optional price/stock monitoring uses Firecrawl `/monitor` when `FIRECRAWL_API_KEY` is set. Register webhooks with `PUBLIC_BASE_URL` + `FIRECRAWL_WEBHOOK_SECRET` (header `x-verdict-webhook-secret`).
+- App: Dashboard -> Shopping Missions. Server: `GET /missions`, `POST /missions`, `POST /missions/:id/run|approve|reject|cancel`.
 
 ## Run
 
