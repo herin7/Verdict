@@ -13,6 +13,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Canvas, Circle, Group, LinearGradient as SkiaGradient, vec } from "@shopify/react-native-skia";
 import { MotiView } from "moti";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Tappable } from "../components/Tappable";
 import { colors, fonts, goldGradient, motion, radius, space } from "../theme";
 
@@ -60,6 +61,7 @@ function OrbArt() {
 export function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const [index, setIndex] = useState(0);
   const listRef = useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems[0]?.index != null) setIndex(viewableItems[0].index);
@@ -105,7 +107,7 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
         )}
       />
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: space(6) + insets.bottom }]}>
         <View style={styles.dots}>
           {SLIDES.map((s, i) => (
             <View key={s.key} style={[styles.dot, i === index && styles.dotOn]} />
@@ -152,7 +154,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     maxWidth: 300,
   },
-  footer: { paddingHorizontal: space(8), paddingBottom: 48, gap: 18 },
+  footer: { paddingHorizontal: space(8), gap: 18 },
   dots: { flexDirection: "row", justifyContent: "center", gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.18)" },
   dotOn: { width: 22, backgroundColor: colors.accent },

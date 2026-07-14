@@ -312,7 +312,13 @@ class VerdictOverlayService : Service() {
         launch.addFlags(
           Intent.FLAG_ACTIVITY_NEW_TASK or
             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-            Intent.FLAG_ACTIVITY_SINGLE_TOP
+            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+            // No slide/zoom transition - that animation is what makes this
+            // read as a "switch away from Amazon" even once the activity is
+            // translucent. MainActivity also applies translucency itself
+            // (synchronously, before this frame is ever composited) so the
+            // host app underneath never gets treated as fully covered.
+            Intent.FLAG_ACTIVITY_NO_ANIMATION
         )
         launch.putExtra(EXTRA_PANEL, true)
         if (!text.isNullOrBlank()) launch.putExtra(EXTRA_TEXT, text)

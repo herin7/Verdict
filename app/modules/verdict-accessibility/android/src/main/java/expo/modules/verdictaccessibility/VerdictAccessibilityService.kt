@@ -63,7 +63,14 @@ class VerdictAccessibilityService : AccessibilityService() {
       "today's deals", "best sellers", "join prime",
     )
 
-    /** Fresh walk of the active window tree. Used on bubble tap. */
+    /**
+     * Fresh walk of the active window tree. Used on bubble tap / explicit
+     * "identify now" requests. Bypasses the ambient MIN_CAPTURE_INTERVAL_MS
+     * throttle entirely (that throttle only applies to the automatic
+     * onAccessibilityEvent path below) and forces retried re-reads if the
+     * tree is momentarily sparse, so it never hands back a stale/previous
+     * product just because the PDP was still laying out at the instant of tap.
+     */
     @JvmStatic
     fun captureNow(): Map<String, Any?> {
       val svc = instance ?: return mapOf(
@@ -71,7 +78,7 @@ class VerdictAccessibilityService : AccessibilityService() {
         "packageName" to lastPackage,
         "isProductPage" to lastHot,
       )
-      return svc.doCapture(forceEmit = false)
+      return svc.doCapture(forceEmit = false, forceFresh = true)
     }
   }
 
@@ -158,29 +165,50 @@ class VerdictAccessibilityService : AccessibilityService() {
     leaveRunnable = null
   }
 
-  private fun doCapture(forceEmit: Boolean, eventPkg: String? = null): Map<String, Any?> {
-    val root = rootInActiveWindow
-    if (root == null) {
-      return mapOf(
-        "text" to lastText,
-        "packageName" to lastPackage,
-        "isProductPage" to lastHot,
-      )
+  private fun doCapture(
+    forceEmit: Boolean,
+    eventPkg: String? = null,
+    forceFresh: Boolean = false,
+  ): Map<String, Any?> {
+    // For forceFresh (explicit) calls, retry a couple times: right after a
+    // window/content transition the a11y tree can briefly report 0-1 nodes
+    // before the PDP finishes laying out. Without this, that transient gap
+    // used to fall through to the stale-cache branch below and hand back
+    // whatever product was last seen - including a DIFFERENT earlier product.
+    var activeRoot: AccessibilityNodeInfo? = null
+    val tokens = LinkedHashSet<String>()
+    val attempts = if (forceFresh) 3 else 1
+    for (attempt in 0 until attempts) {
+      activeRoot = rootInActiveWindow
+      tokens.clear()
+      if (activeRoot != null) {
+        collectText(activeRoot, tokens, 0)
+        if (tokens.size >= 2 || tokens.sumOf { it.length } >= 8) break
+      }
+      if (attempt < attempts - 1) {
+        try {
+          Thread.sleep(35L)
+        } catch (_: InterruptedException) {
+        }
+      }
+    }
+
+    val root = activeRoot
+    val hasEnoughText = tokens.size >= 2 || tokens.sumOf { it.length } >= 8
+    if (root == null || !hasEnoughText) {
+      val pkgNow = eventPkg ?: root?.packageName?.toString()
+      // Never smuggle a DIFFERENT app/page's cached text back as "current" -
+      // only reuse the cache if we're plausibly still on the very same page.
+      return if (pkgNow == null || pkgNow == lastPackage) {
+        mapOf("text" to lastText, "packageName" to lastPackage, "isProductPage" to lastHot)
+      } else {
+        mapOf("text" to null, "packageName" to pkgNow, "isProductPage" to false)
+      }
     }
     val pkg = eventPkg
       ?: root.packageName?.toString()
       ?: lastPackage
       ?: "unknown"
-
-    val tokens = LinkedHashSet<String>()
-    collectText(root, tokens, 0)
-    if (tokens.size < 2 && tokens.sumOf { it.length } < 8) {
-      return mapOf(
-        "text" to lastText,
-        "packageName" to lastPackage,
-        "isProductPage" to lastHot,
-      )
-    }
 
     val text = tokens.joinToString("\n").take(4000)
     val enteringFresh = !wasInWatchedApp

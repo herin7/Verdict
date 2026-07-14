@@ -10,7 +10,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.verdict.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Point your camera at a product to research it."
+        "NSCameraUsageDescription": "Point your camera at a product to research it.",
+        "NSLocationWhenInUseUsageDescription": "Verdict uses your approximate location to show accurate prices and availability on location-gated quick-commerce apps."
       }
     },
     "android": {
@@ -20,7 +21,8 @@
         "SYSTEM_ALERT_WINDOW",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_SPECIAL_USE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "plugins": [
@@ -50,7 +52,15 @@
       ],
       "./modules/verdict-overlay/app.plugin.js",
       "./modules/verdict-accessibility/app.plugin.js",
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Verdict uses your approximate location to show accurate prices and availability on location-gated quick-commerce apps.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ]
     ]
   }
 }

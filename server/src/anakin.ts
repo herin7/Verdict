@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { fetchWithRetry } from "./http.js";
 
 export interface SearchResult {
   url: string;
@@ -40,14 +41,18 @@ export class AnakinCreditError extends Error {
 }
 
 async function anakinRequest(method: "GET" | "POST", path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${config.anakinBaseUrl}${path}`, {
-    method,
-    headers: {
-      "X-API-Key": config.anakinApiKey,
-      "Content-Type": "application/json",
+  const res = await fetchWithRetry(
+    `${config.anakinBaseUrl}${path}`,
+    {
+      method,
+      headers: {
+        "X-API-Key": config.anakinApiKey,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+    { timeoutMs: config.providerHttpTimeoutMs, retries: config.providerHttpRetries }
+  );
   const text = await res.text();
   let json: any;
   try {

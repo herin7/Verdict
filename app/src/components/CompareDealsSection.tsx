@@ -4,18 +4,34 @@ import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "./Tappable";
 import { Badge } from "./Badge";
 import { Card } from "./ui";
+import { LocationBanner } from "./LocationBanner";
 import { colors, fonts, radius, space } from "../theme";
 import { compareEverywhere, fetchDeals } from "../api/client";
 import { getCountry, type Country } from "../country";
 import { openRetailer } from "../deeplink";
+import { track } from "../analytics/posthog";
 import { formatMoney } from "../format";
 import { groupOffersByKind } from "../retailers";
-import type { MarketplaceOffer, ProductIdentity, RankedDeal } from "../types";
+import type { MarketplaceOffer, ProductIdentity, RankedDeal, ReferencePrice } from "../types";
 
-export function CompareDealsSection({ product }: { product: ProductIdentity }) {
-  const [offers, setOffers] = useState<MarketplaceOffer[]>([]);
-  const [deals, setDeals] = useState<RankedDeal[]>([]);
-  const [loading, setLoading] = useState(true);
+export function CompareDealsSection({
+  product,
+  preloaded,
+  referencePrice,
+}: {
+  product: ProductIdentity;
+  /** Skip the internal compare/deals fetch when the caller already has results
+   *  (e.g. Direct Search, which gets both from a single /search call). */
+  preloaded?: { offers: MarketplaceOffer[]; deals: RankedDeal[] };
+  /** The live price already on the user's screen for this product, when known
+   *  (e.g. from the overlay's screen-text identify). Passed through to
+   *  /compare and /deals so a same-platform re-scrape can never be shown as a
+   *  "better deal" than what's already on screen. */
+  referencePrice?: ReferencePrice | null;
+}) {
+  const [offers, setOffers] = useState<MarketplaceOffer[]>(preloaded?.offers ?? []);
+  const [deals, setDeals] = useState<RankedDeal[]>(preloaded?.deals ?? []);
+  const [loading, setLoading] = useState(!preloaded);
   const [error, setError] = useState<string | null>(null);
   const [country, setCountryState] = useState<Country>("IN");
 
@@ -24,18 +40,24 @@ export function CompareDealsSection({ product }: { product: ProductIdentity }) {
   }, []);
 
   useEffect(() => {
+    if (preloaded) return;
     let alive = true;
     (async () => {
       setLoading(true);
       setError(null);
       try {
         const [cmp, dealRes] = await Promise.all([
-          compareEverywhere(product),
-          fetchDeals(product).catch(() => null),
+          compareEverywhere(product, null, referencePrice),
+          fetchDeals(product, undefined, referencePrice).catch(() => null),
         ]);
         if (!alive) return;
         setOffers(cmp.offers ?? []);
         setDeals(dealRes?.deals ?? []);
+        track("compare_viewed", {
+          category: product.category,
+          offerCount: cmp.offers?.length ?? 0,
+          dealCount: dealRes?.deals?.length ?? 0,
+        });
       } catch (e) {
         if (alive) setError((e as Error).message);
       } finally {
@@ -45,7 +67,7 @@ export function CompareDealsSection({ product }: { product: ProductIdentity }) {
     return () => {
       alive = false;
     };
-  }, [product.name, product.searchTerm]);
+  }, [product.name, product.searchTerm, preloaded]);
 
   const grouped = useMemo(() => groupOffersByKind(offers, country), [offers, country]);
   const currency = country === "US" ? "USD" : "INR";
@@ -130,6 +152,7 @@ export function CompareDealsSection({ product }: { product: ProductIdentity }) {
         deals={deals}
         currency={currency}
       />
+      {grouped.quickCommerce.length > 0 && <LocationBanner />}
       <OfferList
         title="Quick commerce"
         offers={grouped.quickCommerce}
@@ -163,32 +186,42 @@ function OfferList({
         return (
           <Tappable
             key={`${o.url}-${i}`}
-            onPress={() => openRetailer(o.url, o.retailerId)}
+            onPress={() => {
+              track("marketplace_deeplink_opened", { platform: o.retailerId, manual: Boolean(o.checkManually) });
+              openRetailer(o.url, o.retailerId);
+            }}
             style={[styles.row, i === 0 && styles.rowFirst]}
           >
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.rowRetailer}>{o.retailer}</Text>
               <Text style={styles.rowTitle} numberOfLines={1}>
-                {o.title}
+                {o.checkManually ? "Live price not available" : o.title}
               </Text>
-              {o.inStock === false && <Text style={styles.oos}>Out of stock</Text>}
+              {!o.checkManually && o.inStock === false && <Text style={styles.oos}>Out of stock</Text>}
             </View>
-            <View style={styles.priceCol}>
-              {deal && deal.totalSavings > 0 ? (
-                <>
-                  <Text style={styles.listStrike}>
-                    {formatMoney(deal.listPrice, o.currency || currency)}
-                  </Text>
+            {o.checkManually ? (
+              <View style={styles.manualCol}>
+                <Ionicons name="open-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.manualText}>Check manually</Text>
+              </View>
+            ) : (
+              <View style={styles.priceCol}>
+                {deal && deal.totalSavings > 0 ? (
+                  <>
+                    <Text style={styles.listStrike}>
+                      {formatMoney(deal.listPrice, o.currency || currency)}
+                    </Text>
+                    <Text style={styles.rowPrice}>
+                      {formatMoney(deal.finalPayable, o.currency || currency)}
+                    </Text>
+                  </>
+                ) : (
                   <Text style={styles.rowPrice}>
-                    {formatMoney(deal.finalPayable, o.currency || currency)}
+                    {o.price != null ? formatMoney(o.price, o.currency || currency) : o.priceRaw ?? "—"}
                   </Text>
-                </>
-              ) : (
-                <Text style={styles.rowPrice}>
-                  {o.price != null ? formatMoney(o.price, o.currency || currency) : o.priceRaw ?? "—"}
-                </Text>
-              )}
-            </View>
+                )}
+              </View>
+            )}
           </Tappable>
         );
       })}
@@ -233,4 +266,6 @@ const styles = StyleSheet.create({
   oos: { fontFamily: fonts.sans, fontSize: 11, color: colors.avoid, marginTop: 2 },
   priceCol: { alignItems: "flex-end" },
   rowPrice: { fontFamily: fonts.mono, fontSize: 14, color: colors.accent },
+  manualCol: { flexDirection: "row", alignItems: "center", gap: 4 },
+  manualText: { fontFamily: fonts.sansSemiBold, fontSize: 12, color: colors.textMuted },
 });

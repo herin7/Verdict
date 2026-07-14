@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Platform, SafeAreaView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, StyleSheet, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
@@ -30,6 +31,7 @@ import {
   isAccessibilitySupported,
   setWatchlist,
 } from "verdict-accessibility";
+import { ErrorBoundary } from "./src/components/ErrorBoundary";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -39,6 +41,8 @@ import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { PaymentRewardsScreen } from "./src/screens/PaymentRewardsScreen";
 import { OverlaySettingsScreen } from "./src/screens/OverlaySettingsScreen";
 import { ProductPanelScreen } from "./src/screens/ProductPanelScreen";
+import { MissionsScreen } from "./src/screens/MissionsScreen";
+import { DirectSearchScreen } from "./src/screens/DirectSearchScreen";
 import { colors } from "./src/theme";
 import { WATCHED_PACKAGE_NAMES } from "./src/overlayApps";
 import { detectProductPage } from "./src/detectProductPage";
@@ -60,15 +64,18 @@ import {
   saveRemoteReport,
 } from "./src/api/client";
 import { supabase, supabaseConfigured } from "./src/lib/supabase";
+import { identify as identifyAnalytics, resetAnalytics, track } from "./src/analytics/posthog";
 import type { BuyLink, ConsensusReport, ProductIdentity, SavedReport } from "./src/types";
 
 type Screen =
   | "dashboard"
   | "scan"
+  | "search"
   | "library"
   | "report"
   | "payments"
   | "overlay"
+  | "missions"
   | "productPanel";
 
 type ScreenTextPayload = { text: string; packageName: string };
@@ -77,9 +84,13 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function App() {
   return (
-    <ShareIntentProvider>
-      <AppInner />
-    </ShareIntentProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <ShareIntentProvider>
+          <AppInner />
+        </ShareIntentProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -110,6 +121,7 @@ function AppInner() {
   const [panelPayload, setPanelPayload] = useState<ScreenTextPayload | null>(null);
 
   const latestScreenText = useRef<ScreenTextPayload | null>(null);
+  const hotDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
 
@@ -137,9 +149,13 @@ function AppInner() {
 
       if (supabaseConfigured && supabase) {
         const { data } = await supabase.auth.getSession();
-        setUsername(data.session?.user?.email ?? data.session?.user?.id ?? null);
+        const initialUser = data.session?.user?.email ?? data.session?.user?.id ?? null;
+        setUsername(initialUser);
+        if (initialUser) identifyAnalytics(initialUser);
         const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-          setUsername(session?.user?.email ?? session?.user?.id ?? null);
+          const nextUser = session?.user?.email ?? session?.user?.id ?? null;
+          setUsername(nextUser);
+          if (nextUser) identifyAnalytics(nextUser);
         });
         unsubscribe = () => sub.subscription.unsubscribe();
       }
@@ -164,11 +180,21 @@ function AppInner() {
   const checkPanelIntent = useCallback(() => {
     if (Platform.OS !== "android" || !isOverlaySupported) return;
     const panel = consumePanelIntent();
-    if (panel?.panel && panel.text?.trim()) {
+    if (!panel?.panel) return;
+    if (panel.text?.trim()) {
       openProductPanel({
         text: panel.text,
         packageName: panel.packageName ?? "unknown",
       });
+      return;
+    }
+    // Intent extras came in empty (a11y tree was still sparse the instant the
+    // bubble was tapped, even after the native retries) - one more fresh
+    // read now, since the tree usually finishes settling within a beat.
+    if (!isAccessibilitySupported) return;
+    const fresh = getCurrentScreenText();
+    if (fresh.text?.trim()) {
+      openProductPanel({ text: fresh.text, packageName: fresh.packageName ?? "unknown" });
     }
   }, []);
 
@@ -212,10 +238,15 @@ function AppInner() {
       if (!canDrawOverlays()) return;
       if (!isAccessibilityServiceEnabled()) return;
       // Native a11y also drives show/hide; keep RN as backup while app alive.
-      if (!isBubbleVisible()) showBubble();
-      setBubbleHot(
-        typeof isProductPage === "boolean" ? isProductPage : detectProductPage(text, packageName)
-      );
+      if (!isBubbleVisible()) {
+        showBubble();
+        track("overlay_bubble_shown");
+      }
+      const hot =
+        typeof isProductPage === "boolean" ? isProductPage : detectProductPage(text, packageName);
+      // Debounce hot flips - a11y events fire very frequently on scroll.
+      if (hotDebounce.current) clearTimeout(hotDebounce.current);
+      hotDebounce.current = setTimeout(() => setBubbleHot(hot), 120);
     });
 
     const leftSub = addLeftShoppingAppListener(() => {
@@ -235,13 +266,28 @@ function AppInner() {
         fresh.packageName ||
         latestScreenText.current?.packageName ||
         "unknown";
-      if (!text?.trim()) return;
-      const next = { text, packageName };
-      latestScreenText.current = next;
-      openProductPanel(next);
+      if (text?.trim()) {
+        const next = { text, packageName };
+        latestScreenText.current = next;
+        track("overlay_bubble_tapped");
+        openProductPanel(next);
+        return;
+      }
+      // Every source came back empty - the a11y tree was still settling
+      // through all of the native retries too. One bounded extra try after
+      // it's had a moment to finish laying out, then give up quietly.
+      setTimeout(() => {
+        const retry = getCurrentScreenText();
+        if (!retry.text?.trim()) return;
+        const next = { text: retry.text, packageName: retry.packageName || "unknown" };
+        latestScreenText.current = next;
+        track("overlay_bubble_tapped");
+        openProductPanel(next);
+      }, 180);
     });
 
     return () => {
+      if (hotDebounce.current) clearTimeout(hotDebounce.current);
       textSub.remove();
       leftSub.remove();
       tapSub.remove();
@@ -253,11 +299,13 @@ function AppInner() {
     setScreenText(null);
     setPanelPayload(payload);
     setView("productPanel");
+    track("overlay_panel_opened");
   }
 
   function closeProductPanel() {
     setPanelPayload(null);
     setView("dashboard");
+    track("overlay_panel_closed");
     if (isOverlaySupported) {
       setPanelTranslucent(false);
       moveTaskToBack();
@@ -298,19 +346,23 @@ function AppInner() {
   }
 
   async function handleLogin(name: string) {
+    identifyAnalytics(name);
     setUsername(name);
     setView("dashboard");
   }
 
   async function handleLogout() {
+    track("auth_logout");
     if (supabaseConfigured && supabase) await supabase.auth.signOut();
     setUsername(null);
+    resetAnalytics();
     if (isOverlaySupported && isBubbleVisible()) hideBubble();
   }
 
   async function finishOnboarding() {
     await setOnboardingDone();
     setOnboardingDoneState(true);
+    track("onboarding_completed");
   }
 
   async function openReport(
@@ -332,6 +384,7 @@ function AppInner() {
     setCameFrom("scan");
     setView("report");
     setScanCountState(await incrementScanCount());
+    track("report_viewed", { category: product.category, verdict: report.verdict, score: report.score });
   }
 
   function openSaved(entry: SavedReport, from: Screen = "library") {
@@ -353,6 +406,7 @@ function AppInner() {
       }
       await deleteReport(current.id);
       setIsSaved(false);
+      track("report_deleted", { category: current.product.category });
     } else {
       if (current.productId) {
         try {
@@ -363,6 +417,7 @@ function AppInner() {
       }
       await saveReport(current);
       setIsSaved(true);
+      track("report_saved", { category: current.product.category });
     }
     refreshLibrary();
   }
@@ -377,6 +432,7 @@ function AppInner() {
       }
     }
     await deleteReport(id);
+    track("report_deleted", { category: item?.product.category });
     refreshLibrary();
   }
 
@@ -400,27 +456,27 @@ function AppInner() {
 
   if (!onboardingDone) {
     return (
-      <SafeAreaView style={styles.root}>
+      <View style={styles.root}>
         <StatusBar style="light" />
         <OnboardingScreen onDone={finishOnboarding} />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!username) {
     return (
-      <SafeAreaView style={styles.root}>
+      <View style={styles.root}>
         <StatusBar style="light" />
         <LoginScreen onLogin={handleLogin} />
-      </SafeAreaView>
+      </View>
     );
   }
 
   const panelOpen = view === "productPanel" && panelPayload;
 
   return (
-    <SafeAreaView style={[styles.root, panelOpen && styles.rootTransparent]}>
-      <StatusBar style="light" translucent={Boolean(panelOpen)} />
+    <View style={[styles.root, panelOpen && styles.rootTransparent]}>
+      <StatusBar style="light" />
 
       {view === "dashboard" && (
         <DashboardScreen
@@ -432,17 +488,26 @@ function AppInner() {
             clearScanInputs();
             setView("scan");
           }}
-          onLibrary={() => setView("library")}
+          onSearch={() => setView("search")}
+          onLibrary={() => {
+            track("library_opened");
+            setView("library");
+          }}
           onPayments={() => setView("payments")}
           onOverlay={() => setView("overlay")}
+          onMissions={() => setView("missions")}
           onOpenReport={(entry) => openSaved(entry, "dashboard")}
           onLogout={handleLogout}
         />
       )}
 
+      {view === "search" && <DirectSearchScreen onHome={() => setView("dashboard")} />}
+
       {view === "payments" && <PaymentRewardsScreen onBack={() => setView("dashboard")} />}
 
       {view === "overlay" && <OverlaySettingsScreen onBack={() => setView("dashboard")} />}
+
+      {view === "missions" && <MissionsScreen onBack={() => setView("dashboard")} />}
 
       {view === "report" && current && (
         <ReportScreen
@@ -473,7 +538,10 @@ function AppInner() {
       {view === "library" && (
         <LibraryScreen
           items={library}
-          onOpen={openSaved}
+          onOpen={(entry) => {
+            track("library_item_opened", { category: entry.product.category });
+            openSaved(entry);
+          }}
           onDelete={handleDelete}
           onHome={() => setView("dashboard")}
         />
@@ -494,7 +562,7 @@ function AppInner() {
           />
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

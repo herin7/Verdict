@@ -99,6 +99,20 @@ export interface MarketplaceOffer {
   coupons: string[];
   matchScore: number;
   matchReason: string;
+  /** True for deeplinkOnly platforms (e.g. Zepto, Milkbasket) - no live price was
+   *  fetched; url is a "check manually" link to the platform's app/website. */
+  checkManually?: boolean;
+  /** True when this is the same listing the user is already viewing - price is
+   *  forced to the live on-screen reference price, never a re-scrape. */
+  isCurrentListing?: boolean;
+}
+
+/** The price already on the user's current screen - the authoritative baseline
+ *  for compare/deals. See server/src/marketplaces/normalize.ts ReferencePrice. */
+export interface ReferencePrice {
+  amount: number;
+  currency: string;
+  retailerId?: string | null;
 }
 
 export type PaymentMethodId =
@@ -136,4 +150,5 @@ export interface RankedDeal {
   totalSavings: number;
   applied: AppliedDeal[];
   methodUsed: PaymentMethodId | null;
+  verifiedDeal: boolean;
 }

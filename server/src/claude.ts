@@ -1,6 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { z } from "zod";
-import { config } from "./config.js";
+import { runWorkload } from "./ai/gateway.js";
+import type { ImageMediaType, LLMMessage, ToolSpec } from "./ai/types.js";
 import {
   ConsensusReportSchema,
   IdentifyResultSchema,
@@ -17,149 +16,41 @@ import {
   type BestInCategory,
 } from "./schema.js";
 import type { ScrapedPage } from "./anakin.js";
-import { coerceToSchema } from "./coerce.js";
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
+const STRONG_SIGNAL_CONFIDENCE_FLOOR = 0.7;
 
-type Base64Media = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+/**
+ * Post-validation quality gate for identify_image: a schema-valid, isProduct=true
+ * result with low confidence is worth one more careful look, since the model
+ * often under-rates a genuine PDP screenshot when it hasn't explicitly reasoned
+ * about the concrete evidence (ASIN, buy box, price+brand, breadcrumbs) in view.
+ */
+function identifyImageRetryHint(data: IdentifyResult): string | null {
+  if (!data.isProduct) return null;
+  if (data.confidence >= STRONG_SIGNAL_CONFIDENCE_FLOOR) return null;
+  if (!data.name || !data.name.trim()) return null;
+  return [
+    `You reported "${data.name}" with confidence ${data.confidence.toFixed(2)}.`,
+    "Before finalizing, look again for concrete product-detail-page evidence in the image: an ASIN or product code, a Buy Now / Add to Cart button, a price shown next to the title and brand, or a category breadcrumb trail.",
+    "If that evidence is visible and clearly matches one product, raise confidence to reflect it (>=0.7). If you truly cannot find a clear product, keep confidence low.",
+  ].join(" ");
+}
 
-function parseImage(input: string): { media: Base64Media; data: string } {
+function parseImage(input: string): { media: ImageMediaType; data: string } {
   const match = input.match(/^data:(image\/[a-zA-Z]+);base64,(.*)$/);
   if (match) {
-    return { media: match[1] as Base64Media, data: match[2] };
+    return { media: match[1] as ImageMediaType, data: match[2] };
   }
   return { media: "image/jpeg", data: input };
 }
 
-/**
- * Forces Claude to call `tool` and validates the result against `schema`. Claude
- * occasionally emits a tool call missing required fields (non-contiguously, not
- * just truncation) or with the wrong shape - rather than failing the whole
- * request, this feeds the exact validation errors back to Claude as a rejected
- * tool_result and asks it to re-call the tool with everything filled in.
- */
-async function callToolWithValidation<T>(
-  schema: z.ZodType<T>,
-  tool: Anthropic.Tool,
-  initialMessages: Anthropic.MessageParam[],
-  opts: {
-    maxTokens: number;
-    system?: string;
-    maxAttempts?: number;
-    /** Applied to the raw tool input before coercion/validation, e.g. to fill in optional-field defaults. */
-    normalize?: (raw: unknown) => unknown;
-  }
-): Promise<T> {
-  const maxAttempts = opts.maxAttempts ?? 3;
-  let messages: Anthropic.MessageParam[] = [...initialMessages];
-  let lastError = "";
-
-  // Every tool_use block in an assistant turn MUST get a matching tool_result in
-  // the very next message, or the next API call is rejected outright. If Claude
-  // ever emits more than one tool_use in a turn (parallel tool use), resolving
-  // only the "primary" one leaves the rest dangling - so always resolve all of them.
-  function rejectAllToolUses(
-    content: Anthropic.ContentBlock[],
-    primaryId: string,
-    primaryMessage: string
-  ): Anthropic.MessageParam {
-    const blocks = content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-    return {
-      role: "user",
-      content: blocks.map((b) => ({
-        type: "tool_result" as const,
-        tool_use_id: b.id,
-        is_error: true,
-        content:
-          b.id === primaryId
-            ? primaryMessage
-            : "Superseded by another tool call in the same turn - ignore this one.",
-      })),
-    };
-  }
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const msg = await client.messages.create({
-      model: config.anthropicModel,
-      max_tokens: opts.maxTokens,
-      tools: [tool],
-      tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true },
-      system: opts.system,
-      messages,
-    });
-
-    if (msg.stop_reason === "max_tokens") {
-      lastError = "response was cut off before finishing (max_tokens)";
-      const hasToolUse = msg.content.some((b) => b.type === "tool_use");
-      messages = [
-        ...messages,
-        { role: "assistant", content: msg.content },
-        hasToolUse
-          ? rejectAllToolUses(
-              msg.content,
-              "",
-              "Your previous response was cut off before it finished. Call the tool again, but keep every field noticeably shorter so the entire call fits within the token budget."
-            )
-          : {
-              role: "user",
-              content:
-                "Your previous response was cut off before it finished. Call the tool again, but keep every field noticeably shorter so the entire call fits within the token budget.",
-            },
-      ];
-      continue;
-    }
-
-    const toolBlock = msg.content.find(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-    if (!toolBlock) {
-      lastError = "no tool_use block in response";
-      messages = [
-        ...messages,
-        { role: "assistant", content: msg.content },
-        { role: "user", content: `You must call the ${tool.name} tool with its full arguments.` },
-      ];
-      continue;
-    }
-
-    const normalized = opts.normalize ? opts.normalize(toolBlock.input) : toolBlock.input;
-    const coerced = coerceToSchema(schema, normalized);
-    const result = schema.safeParse(coerced);
-    if (result.success) return result.data;
-
-    lastError = result.error.issues
-      .map((i) => `- ${i.path.join(".") || "(root)"}: ${i.message}`)
-      .join("\n");
-
-    if (attempt === maxAttempts) break;
-
-    console.warn(`[claude] ${tool.name} attempt ${attempt} failed validation, retrying:\n${lastError}`);
-
-    messages = [
-      ...messages,
-      { role: "assistant", content: msg.content },
-      rejectAllToolUses(
-        msg.content,
-        toolBlock.id,
-        `Your call to ${tool.name} was rejected - these fields were missing or the wrong type:\n${lastError}\n\nCall ${tool.name} again with a complete, valid set of arguments. Do not omit any required field.`
-      ),
-    ];
-  }
-
-  throw new Error(
-    `Claude failed to produce a valid ${tool.name} call after ${maxAttempts} attempts:\n${lastError}`
-  );
-}
-
 export async function identifyProduct(imageBase64: string): Promise<IdentifyResult> {
   const { media, data } = parseImage(imageBase64);
-  const tool: Anthropic.Tool = {
+  const tool: ToolSpec = {
     name: "report_product",
     description:
       "Report the single most prominent commercial product in the image, or reject if it is not a shoppable product.",
-    input_schema: {
+    inputSchema: {
       type: "object",
       properties: {
         isProduct: {
@@ -187,7 +78,11 @@ export async function identifyProduct(imageBase64: string): Promise<IdentifyResu
         brand: { type: ["string", "null"] },
         category: { type: "string", description: "e.g. smartphone, running shoe, book" },
         model: { type: ["string", "null"] },
-        confidence: { type: "number", description: "0-1 identification confidence" },
+        confidence: {
+          type: "number",
+          description:
+            "0-1 identification confidence. Use >=0.7 when a clear product title/packaging is visible together with supporting evidence: an ASIN or product code, a Buy Now/Add to Cart button, a price shown with the title and brand, or a category breadcrumb (i.e. this looks like a marketplace product detail page). Use <0.4 only when the product cannot be clearly identified.",
+        },
         searchTerm: {
           type: "string",
           description: "Best query string to research this product online",
@@ -197,44 +92,48 @@ export async function identifyProduct(imageBase64: string): Promise<IdentifyResu
     },
   };
 
-  return callToolWithValidation(
-    IdentifyResultSchema,
-    tool,
-    [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: media, data } },
-          {
-            type: "text",
-            text: [
-              "Identify the main shoppable product in this photo for a buying-decision research app.",
-              "Reject (isProduct=false) if the image is nudity, a person without a clear product,",
-              "a vehicle, animal, landscape, meme, document, non-shopping screenshot, or otherwise not a product.",
-              "Only set isProduct=true for clear commercial products a shopper would buy.",
-            ].join(" "),
-          },
-        ],
-      },
-    ],
+  const messages: LLMMessage[] = [
     {
-      maxTokens: 512,
-      maxAttempts: 2,
-      normalize: (raw) => ({
-        brand: null,
-        model: null,
-        rejectReason: null,
-        isProduct: true,
-        ...(raw as Record<string, unknown>),
-      }),
-    }
-  );
+      role: "user",
+      content: [
+        { type: "image", mediaType: media, data },
+        {
+          type: "text",
+          text: [
+            "Identify the main shoppable product in this photo for a buying-decision research app.",
+            "Reject (isProduct=false) if the image is nudity, a person without a clear product,",
+            "a vehicle, animal, landscape, meme, document, non-shopping screenshot, or otherwise not a product.",
+            "Only set isProduct=true for clear commercial products a shopper would buy.",
+            "If this is a screenshot of a marketplace product detail page, treat a product title together with an ASIN/code, a Buy Now/Add to Cart button, a price shown with the brand, or a breadcrumb trail as strong evidence - reflect that with high confidence (>=0.7) rather than hedging.",
+          ].join(" "),
+        },
+      ],
+    },
+  ];
+
+  const result = await runWorkload<IdentifyResult>({
+    workload: "identify_image",
+    schema: IdentifyResultSchema,
+    tool,
+    messages,
+    maxTokens: 512,
+    maxAttempts: 3,
+    normalize: (raw) => ({
+      brand: null,
+      model: null,
+      rejectReason: null,
+      isProduct: true,
+      ...(raw as Record<string, unknown>),
+    }),
+    retryHint: identifyImageRetryHint,
+  });
+  return result.data;
 }
 
-const REPORT_TOOL: Anthropic.Tool = {
+const REPORT_TOOL: ToolSpec = {
   name: "consensus_report",
   description: "Produce the internet-consensus buying report for the product.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       verdict: { type: "string", enum: ["buy", "wait", "avoid", "mixed"] },
@@ -346,22 +245,22 @@ export async function synthesizeReport(
     .join("\n\n")
     .slice(0, 90000);
 
-  return callToolWithValidation(
-    ConsensusReportSchema,
-    REPORT_TOOL,
-    [
+  const result = await runWorkload<ConsensusReport>({
+    workload: "report",
+    schema: ConsensusReportSchema,
+    tool: REPORT_TOOL,
+    messages: [
       {
         role: "user",
         content: `Product: ${product.name} (${product.brand ?? "unknown brand"}, ${product.category}).\n\nProduce the consensus buying report from these sources:\n\n${corpus}`,
       },
     ],
-    {
-      maxTokens: 4096,
-      maxAttempts: 3,
-      system:
-        "You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.",
-    }
-  );
+    maxTokens: 4096,
+    maxAttempts: 3,
+    system:
+      "You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.",
+  });
+  return result.data;
 }
 
 function buildCorpus(pages: ScrapedPage[], perPageChars = 5000, totalChars = 40000): string {
@@ -375,10 +274,10 @@ function productLine(product: ProductIdentity): string {
   return `Product: ${product.name} (${product.brand ?? "unknown brand"}, ${product.category}).`;
 }
 
-const LONG_TERM_TOOL: Anthropic.Tool = {
+const LONG_TERM_TOOL: ToolSpec = {
   name: "long_term_score",
   description: "Report how owner sentiment shifts over weeks/months/years of real-world use.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       score: { type: "integer", description: "0-100 long-term satisfaction score, not out of 10 or 5." },
@@ -406,28 +305,28 @@ export async function synthesizeLongTermScore(
   product: ProductIdentity,
   pages: ScrapedPage[]
 ): Promise<LongTermScore> {
-  return callToolWithValidation(
-    LongTermScoreSchema,
-    LONG_TERM_TOOL,
-    [
+  const result = await runWorkload<LongTermScore>({
+    workload: "insight_long_term",
+    schema: LongTermScoreSchema,
+    tool: LONG_TERM_TOOL,
+    messages: [
       {
         role: "user",
         content: `${productLine(product)}\n\nFrom these sources, report how opinions change the longer people own it:\n\n${buildCorpus(pages)}`,
       },
     ],
-    {
-      maxTokens: 1024,
-      maxAttempts: 2,
-      system:
-        "You analyze long-term ownership sentiment. Focus only on how satisfaction changes over time (early impressions vs. months/years later) - not a general review. If sources don't discuss long-term use, say so honestly in the summary and keep the timeline short. Every field is required.",
-    }
-  );
+    maxTokens: 1024,
+    maxAttempts: 2,
+    system:
+      "You analyze long-term ownership sentiment. Focus only on how satisfaction changes over time (early impressions vs. months/years later) - not a general review. If sources don't discuss long-term use, say so honestly in the summary and keep the timeline short. Every field is required.",
+  });
+  return result.data;
 }
 
-const VERSION_HISTORY_TOOL: Anthropic.Tool = {
+const VERSION_HISTORY_TOOL: ToolSpec = {
   name: "version_history",
   description: "Compare this product to its previous version/generation and whether upgrading is worth it.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       hasPreviousVersion: { type: "boolean" },
@@ -456,29 +355,29 @@ export async function synthesizeVersionHistory(
   product: ProductIdentity,
   pages: ScrapedPage[]
 ): Promise<VersionHistory> {
-  return callToolWithValidation(
-    VersionHistorySchema,
-    VERSION_HISTORY_TOOL,
-    [
+  const result = await runWorkload<VersionHistory>({
+    workload: "insight_version",
+    schema: VersionHistorySchema,
+    tool: VERSION_HISTORY_TOOL,
+    messages: [
       {
         role: "user",
         content: `${productLine(product)}\n\nFrom these sources, compare it against its previous version/generation:\n\n${buildCorpus(pages)}`,
       },
     ],
-    {
-      maxTokens: 1024,
-      maxAttempts: 2,
-      normalize: (raw) => ({ changes: [], previousVersion: null, ...(raw as Record<string, unknown>) }),
-      system:
-        "You track product version history. If the sources don't clearly identify a previous version, set hasPreviousVersion to false, worthUpgrading to 'not_applicable', and say so plainly in the summary rather than guessing. Never invent a comparison that isn't grounded in the sources. Every field is required.",
-    }
-  );
+    maxTokens: 1024,
+    maxAttempts: 2,
+    normalize: (raw) => ({ changes: [], previousVersion: null, ...(raw as Record<string, unknown>) }),
+    system:
+      "You track product version history. If the sources don't clearly identify a previous version, set hasPreviousVersion to false, worthUpgrading to 'not_applicable', and say so plainly in the summary rather than guessing. Never invent a comparison that isn't grounded in the sources. Every field is required.",
+  });
+  return result.data;
 }
 
-const SCAM_DETECTOR_TOOL: Anthropic.Tool = {
+const SCAM_DETECTOR_TOOL: ToolSpec = {
   name: "scam_detector",
   description: "Assess fake-review, counterfeit, and suspicious-seller risk for this product.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       riskLevel: { type: "string", enum: ["low", "medium", "high"], description: "Overall combined risk." },
@@ -502,29 +401,29 @@ export async function synthesizeScamDetector(
   product: ProductIdentity,
   pages: ScrapedPage[]
 ): Promise<ScamDetector> {
-  return callToolWithValidation(
-    ScamDetectorSchema,
-    SCAM_DETECTOR_TOOL,
-    [
+  const result = await runWorkload<ScamDetector>({
+    workload: "insight_scam",
+    schema: ScamDetectorSchema,
+    tool: SCAM_DETECTOR_TOOL,
+    messages: [
       {
         role: "user",
         content: `${productLine(product)}\n\nFrom these sources, assess fake review, counterfeit, and suspicious-seller risk:\n\n${buildCorpus(pages)}`,
       },
     ],
-    {
-      maxTokens: 900,
-      maxAttempts: 2,
-      normalize: (raw) => ({ redFlags: [], fakeReviewEstimatePercent: null, ...(raw as Record<string, unknown>) }),
-      system:
-        "You are a fraud/authenticity analyst for online purchases. Be evidence-based: if sources show no scam/counterfeit signal, riskLevel should be 'low' and redFlags can be empty - do not manufacture risk. Never invent a percentage; use null when there is no basis. Every field is required.",
-    }
-  );
+    maxTokens: 900,
+    maxAttempts: 2,
+    normalize: (raw) => ({ redFlags: [], fakeReviewEstimatePercent: null, ...(raw as Record<string, unknown>) }),
+    system:
+      "You are a fraud/authenticity analyst for online purchases. Be evidence-based: if sources show no scam/counterfeit signal, riskLevel should be 'low' and redFlags can be empty - do not manufacture risk. Never invent a percentage; use null when there is no basis. Every field is required.",
+  });
+  return result.data;
 }
 
-const BEST_IN_CATEGORY_TOOL: Anthropic.Tool = {
+const BEST_IN_CATEGORY_TOOL: ToolSpec = {
   name: "best_in_category",
   description: "Rank this product against its direct competitors in the same category.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       rank: { type: "string", description: "e.g. 'Top 3 of ~8 compared', 'Mid-pack', '#1 in its price tier'." },
@@ -552,21 +451,21 @@ export async function synthesizeBestInCategory(
   product: ProductIdentity,
   pages: ScrapedPage[]
 ): Promise<BestInCategory> {
-  return callToolWithValidation(
-    BestInCategorySchema,
-    BEST_IN_CATEGORY_TOOL,
-    [
+  const result = await runWorkload<BestInCategory>({
+    workload: "insight_best_in_category",
+    schema: BestInCategorySchema,
+    tool: BEST_IN_CATEGORY_TOOL,
+    messages: [
       {
         role: "user",
         content: `${productLine(product)}\n\nFrom these sources, rank it against direct competitors in the ${product.category} category:\n\n${buildCorpus(pages)}`,
       },
     ],
-    {
-      maxTokens: 1024,
-      maxAttempts: 2,
-      normalize: (raw) => ({ competitors: [], ...(raw as Record<string, unknown>) }),
-      system:
-        "You rank products against category competitors using only what the sources actually compare it to. Do not invent competitor names that aren't grounded in the sources. Every field is required.",
-    }
-  );
+    maxTokens: 1024,
+    maxAttempts: 2,
+    normalize: (raw) => ({ competitors: [], ...(raw as Record<string, unknown>) }),
+    system:
+      "You rank products against category competitors using only what the sources actually compare it to. Do not invent competitor names that aren't grounded in the sources. Every field is required.",
+  });
+  return result.data;
 }

@@ -17,6 +17,17 @@ const BodySchema = z.object({
   }),
   gtin: z.string().nullable().optional(),
   country: z.enum(["IN", "US"]).optional(),
+  location: z.object({ lat: z.number(), lon: z.number() }).optional(),
+  /** Live price already on the user's screen for this exact product - see
+   *  services/compare.ts applyReferenceGuard for how this is used. */
+  reference: z
+    .object({
+      amount: z.number().positive(),
+      currency: z.string().min(1),
+      retailerId: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export async function compareRoute(app: FastifyInstance) {
@@ -38,11 +49,25 @@ export async function compareRoute(app: FastifyInstance) {
         confidence: p.confidence ?? 1,
         searchTerm: p.searchTerm ?? p.name,
       };
+      const start = Date.now();
       try {
         const result = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
+          location: parsed.data.location ?? null,
+          reference: parsed.data.reference ?? null,
         });
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            cache: result.cached ? "hit" : "miss",
+            latencyMs: Date.now() - start,
+            offerCount: result.offers.length,
+            ok: true,
+          },
+          "compare_outcome"
+        );
         return {
           offers: result.offers,
           productId: result.productId,
@@ -51,6 +76,16 @@ export async function compareRoute(app: FastifyInstance) {
         };
       } catch (err) {
         req.log.error(err);
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            latencyMs: Date.now() - start,
+            ok: false,
+            error: (err as Error).message,
+          },
+          "compare_outcome"
+        );
         return reply.code(502).send({ error: (err as Error).message });
       }
     }

@@ -6,10 +6,11 @@ import { Tappable } from "../components/Tappable";
 import { ScoreGauge } from "../components/ScoreGauge";
 import { Badge } from "../components/Badge";
 import { CompareDealsSection } from "../components/CompareDealsSection";
-import { Card, PillButton, PrimaryButton, SheetHeader, TabBar } from "../components/ui";
+import { Card, ErrorBanner, LoadingState, PillButton, PrimaryButton, SheetHeader, TabBar } from "../components/ui";
 import { identifyScreen, research, compareEverywhere } from "../api/client";
 import { getCountry, type Country } from "../country";
 import { openRetailer } from "../deeplink";
+import { track } from "../analytics/posthog";
 import { formatMoney } from "../format";
 import { groupOffersByKind, labelForPackage } from "../retailers";
 import { colors, fonts, motion, radius, space, verdictColor, verdictLabel } from "../theme";
@@ -18,6 +19,7 @@ import type {
   ConsensusReport,
   MarketplaceOffer,
   ProductIdentity,
+  ReferencePrice,
 } from "../types";
 
 type Tab = "report" | "deal" | "discount";
@@ -39,6 +41,7 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
   const [stage, setStage] = useState<"identifying" | "researching" | "ready" | "error">("identifying");
   const [error, setError] = useState<string | null>(null);
   const [product, setProduct] = useState<ProductIdentity | null>(null);
+  const [referencePrice, setReferencePrice] = useState<ReferencePrice | null>(null);
   const [report, setReport] = useState<ConsensusReport | null>(null);
   const [buyLinks, setBuyLinks] = useState<BuyLink[]>([]);
   const [productId, setProductId] = useState<string | null>(null);
@@ -59,9 +62,13 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
       setStage("identifying");
       setError(null);
       try {
-        const p = await identifyScreen(text, packageName);
+        const { product: p, referencePrice: ref } = await identifyScreen(text, packageName);
         if (!alive) return;
         setProduct(p);
+        // The price already on this screen - authoritative baseline passed to
+        // compare/deals so a same-platform re-scrape can never be shown as a
+        // "better deal" than what the user is looking at right now.
+        setReferencePrice(ref);
         setStage("researching");
         const res = await research(p);
         if (!alive) return;
@@ -87,9 +94,14 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
     setDealsLoading(true);
     (async () => {
       try {
-        const cmp = await compareEverywhere(product);
+        const cmp = await compareEverywhere(product, null, referencePrice);
         if (!alive) return;
         setOffers(cmp?.offers ?? []);
+        // "deal" tab renders its own CompareDealsSection (tracks compare_viewed itself);
+        // this fetch only feeds the visible offer list for the "discount" tab.
+        if (tab === "discount") {
+          track("deals_viewed", { category: product.category, offerCount: cmp?.offers?.length ?? 0 });
+        }
       } catch {
         if (alive) setOffers([]);
       } finally {
@@ -153,18 +165,14 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
             transition={{ type: "timing", duration: motion.fast }}
           >
             {(stage === "identifying" || stage === "researching") && (
-              <View style={styles.center}>
-                <ActivityIndicator color={colors.accent} size="large" />
-                <Text style={styles.loadingText}>
-                  {stage === "identifying" ? "Identifying product…" : "Building consensus…"}
-                </Text>
-              </View>
+              <LoadingState
+                label={stage === "identifying" ? "Identifying product…" : "Building consensus…"}
+              />
             )}
 
             {stage === "error" && (
               <View style={styles.center}>
-                <Ionicons name="alert-circle-outline" size={28} color={colors.avoid} />
-                <Text style={styles.errorText}>{error ?? "Something went wrong"}</Text>
+                <ErrorBanner message={error ?? "Something went wrong"} />
                 <SecondaryClose onPress={onClose} />
               </View>
             )}
@@ -244,7 +252,7 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
 
             {stage === "ready" && product && tab === "deal" && (
               <View style={{ gap: space(3) }}>
-                <CompareDealsSection product={product} />
+                <CompareDealsSection product={product} referencePrice={referencePrice} />
               </View>
             )}
 
@@ -299,23 +307,34 @@ function OfferGroup({
       {offers.slice(0, 8).map((o, i) => (
         <Tappable
           key={`${o.url}-${i}`}
-          onPress={() => o.url && openRetailer(o.url, o.retailerId).catch(() => {})}
+          onPress={() => {
+            if (!o.url) return;
+            track("marketplace_deeplink_opened", { platform: o.retailerId, manual: Boolean(o.checkManually) });
+            openRetailer(o.url, o.retailerId).catch(() => {});
+          }}
           style={styles.offerRow}
         >
           <View style={{ flex: 1 }}>
             <Text style={styles.offerMarket}>{o.retailer}</Text>
             <Text style={styles.offerTitle} numberOfLines={2}>
-              {o.title ?? productName}
+              {o.checkManually ? "Live price not available" : o.title ?? productName}
             </Text>
-            {o.coupons?.length > 0 && (
+            {!o.checkManually && o.coupons?.length > 0 && (
               <Text style={styles.muted} numberOfLines={1}>
                 {o.coupons.slice(0, 2).join(" · ")}
               </Text>
             )}
           </View>
-          <Text style={styles.offerPrice}>
-            {o.price != null ? formatMoney(o.price, o.currency) : o.priceRaw ?? "—"}
-          </Text>
+          {o.checkManually ? (
+            <View style={styles.manualRow}>
+              <Ionicons name="open-outline" size={13} color={colors.textMuted} />
+              <Text style={styles.manualText}>Check manually</Text>
+            </View>
+          ) : (
+            <Text style={styles.offerPrice}>
+              {o.price != null ? formatMoney(o.price, o.currency) : o.priceRaw ?? "—"}
+            </Text>
+          )}
         </Tappable>
       ))}
     </View>
@@ -403,4 +422,6 @@ const styles = StyleSheet.create({
   offerMarket: { fontFamily: fonts.mono, fontSize: 10, color: colors.accent },
   offerTitle: { fontFamily: fonts.sans, color: colors.text, fontSize: 13 },
   offerPrice: { fontFamily: fonts.mono, color: colors.text, fontSize: 13 },
+  manualRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  manualText: { fontFamily: fonts.sansSemiBold, fontSize: 12, color: colors.textMuted },
 });

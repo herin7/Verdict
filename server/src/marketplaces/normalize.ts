@@ -13,6 +13,31 @@ export interface MarketplaceOffer {
   coupons: string[];
   matchScore: number;
   matchReason: string;
+  /** True for deeplinkOnly platforms - no live price fetched, url is a "check manually" link. */
+  checkManually?: boolean;
+  /**
+   * True when this offer is for the SAME platform the user is already looking
+   * at (matched by retailerId against the request's ReferencePrice). Its price
+   * has been forced to the live on-screen reference price - never a fresh/cached
+   * re-scrape - since a re-scrape of "the same listing" can disagree (stale
+   * cache, wrong variant, different currency) with what the user is seeing right
+   * now. Never eligible to be flagged as a "deal" (see deals/calculator.ts).
+   */
+  isCurrentListing?: boolean;
+}
+
+/**
+ * The price the user is ALREADY looking at, extracted from their own current
+ * screen/screenshot (e.g. accessibility screen-text priceHint, or JSON-LD/meta
+ * price from a pasted URL). Treated as authoritative/live for `retailerId`
+ * (when known) - never overridden by a separate re-scrape of the same platform.
+ */
+export interface ReferencePrice {
+  amount: number;
+  currency: string;
+  /** Marketplace id the user is currently viewing, if known (e.g. from packageName
+   *  or the pasted URL's domain). Enables same-platform self-comparison guards. */
+  retailerId?: string | null;
 }
 
 const PRICE_NUM_RE = /([\d,]+(?:\.\d{1,2})?)/;
@@ -27,6 +52,23 @@ export function parsePrice(
   if (!m) return { amount: null, currency };
   const amount = Number(m[1]);
   return { amount: Number.isFinite(amount) ? amount : null, currency };
+}
+
+/**
+ * Builds a ReferencePrice from a raw price string (e.g. a screen-text priceHint
+ * or a JSON-LD offer price) plus a known/likely currency and retailer. Returns
+ * null when no numeric price can be parsed - callers must never fabricate a
+ * reference price.
+ */
+export function toReferencePrice(
+  rawPrice: string | null | undefined,
+  currency: string | null | undefined,
+  retailerId: string | null,
+  defaultCurrency: string = "INR"
+): ReferencePrice | null {
+  const parsed = parsePrice(rawPrice, currency || defaultCurrency);
+  if (parsed.amount == null) return null;
+  return { amount: parsed.amount, currency: currency || parsed.currency, retailerId };
 }
 
 function tokenize(s: string): Set<string> {
@@ -97,6 +139,7 @@ export function normalizeOffer(input: {
   coupons?: string[];
   matchScore: number;
   matchReason: string;
+  checkManually?: boolean;
 }): MarketplaceOffer {
   const parsed = parsePrice(input.priceRaw ?? null, input.defaultCurrency ?? "INR");
   return {
@@ -114,5 +157,6 @@ export function normalizeOffer(input: {
     coupons: input.coupons ?? [],
     matchScore: input.matchScore,
     matchReason: input.matchReason,
+    checkManually: input.checkManually ?? false,
   };
 }

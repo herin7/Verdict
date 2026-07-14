@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Tappable } from "../components/Tappable";
 import { FadeIn } from "../components/FadeIn";
-import { colors, fonts, radius } from "../theme";
+import { Screen, ScreenHeader } from "../components/ui";
+import { colors, fonts, radius, space } from "../theme";
 import { getDealsCatalog, getPaymentProfile, savePaymentProfile } from "../api/client";
 import { getLocalPaymentMethods, setLocalPaymentMethods } from "../storage";
 import type { PaymentCatalogItem, PaymentMethodId } from "../types";
@@ -81,15 +83,13 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
     { kind: "membership", title: "Memberships" },
   ];
 
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <Tappable onPress={onBack} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={20} color={colors.text} />
-        </Tappable>
-        <Text style={styles.title}>Payment & Rewards</Text>
-        <View style={{ width: 36 }} />
-      </View>
+    // Bottom edge is handled manually below (insets.bottom) since the save button
+    // is absolutely positioned - Screen's own bottom padding wouldn't reach it.
+    <Screen edges={["top"]}>
+      <ScreenHeader title="Payment & Rewards" onBack={onBack} />
 
       <Text style={styles.sub}>
         Pick cards, wallets, and memberships you own. We never ask for numbers or balances - only what you have.
@@ -98,7 +98,10 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
       {loading ? (
         <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingBottom: space(24) + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
+        >
           {groups.map((g) => {
             const items = catalog.filter((c) => c.kind === g.kind);
             if (!items.length) return null;
@@ -124,31 +127,24 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
         </ScrollView>
       )}
 
-      <Tappable onPress={save} style={styles.saveBtn} disabled={saving}>
+      <Tappable
+        onPress={save}
+        style={[styles.saveBtn, { bottom: space(6) + insets.bottom }]}
+        disabled={saving}
+      >
         {saving ? (
           <ActivityIndicator color={colors.onAccent} />
         ) : (
           <Text style={styles.saveText}>{saved ? "Saved" : "Save preferences"}</Text>
         )}
       </Tappable>
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20, paddingTop: 8 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surface,
-  },
-  title: { fontFamily: fonts.serif, fontSize: 22, color: colors.text },
   sub: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18, marginBottom: 16 },
-  scroll: { paddingBottom: 100, gap: 8 },
+  scroll: { gap: 8 },
   group: { marginBottom: 16, gap: 8 },
   groupTitle: {
     fontFamily: fonts.sansSemiBold,
@@ -174,9 +170,9 @@ const styles = StyleSheet.create({
   rowLabelOn: { color: colors.text, fontFamily: fonts.sansSemiBold },
   saveBtn: {
     position: "absolute",
-    left: 20,
-    right: 20,
-    bottom: 24,
+    left: space(5),
+    right: space(5),
+    bottom: space(6),
     backgroundColor: colors.accent,
     borderRadius: radius.pill,
     paddingVertical: 16,

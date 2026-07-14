@@ -1,6 +1,17 @@
 export type Country = "IN" | "US";
 export type MarketplaceKind = "marketplace" | "quick_commerce";
 
+/**
+ * Live price/availability capability per marketplace.
+ * - "scrape": worth attempting via the orchestrator (search + Firecrawl extract).
+ * - "deeplinkOnly": no reliable public catalog/API (app-only, signed/session-gated,
+ *   aggressive anti-bot) - surface as a "check manually" deep link instead of
+ *   wasting requests on scrape attempts that would produce stale/wrong prices.
+ * Unset defaults to "scrape" - preserves existing behavior for marketplaces
+ * registered before this field existed (Amazon, Flipkart, etc).
+ */
+export type MarketplaceCapability = "scrape" | "deeplinkOnly";
+
 export type MarketplaceCategory =
   | "general"
   | "electronics"
@@ -21,23 +32,128 @@ export interface Marketplace {
   domains: string[];
   categories: MarketplaceCategory[];
   kind: MarketplaceKind;
+  capability?: MarketplaceCapability;
+  /**
+   * Scrape-capable platforms that aggressively block datacenter IPs, so a plain
+   * scrape reliably 403s - request Firecrawl's enhanced/stealth proxy instead of
+   * wasting a basic-proxy attempt.
+   */
+  antiBotStealth?: boolean;
+  /** Homepage URL surfaced for deeplinkOnly platforms when no query/searchUrl is
+   *  available. Defaults to https://{domains[0]}. */
+  manualUrl?: string;
+  /** Builds a real in-app search URL (not just the homepage) for a deeplinkOnly
+   *  platform, given the product's search term - documented per platform. */
+  searchUrl?: (query: string) => string;
+  /**
+   * Scrape-capable platforms whose pricing/availability is gated by delivery
+   * location (pincode/lat-long), not just country. When the caller supplies an
+   * approximate location, extract requests for these get an explicit IN
+   * geography hint (Firecrawl's `location` param) instead of Firecrawl's US
+   * default. Note: neither Blinkit nor BigBasket expose a simple URL/cookie
+   * param for pincode-level accuracy (both require an interactive location
+   * picker) - true dark-store-level precision would need a Firecrawl `actions`
+   * (click+type) sequence, which is out of scope for this fix.
+   */
+  locationAware?: boolean;
+  /** Android package-name substrings that identify this platform's app - lets the
+   *  screen-text identify flow (which only has a packageName, no URL) know which
+   *  marketplace the user is currently viewing, for same-platform guards. */
+  packageHints?: string[];
 }
 
 const IN_MARKETPLACES: Marketplace[] = [
-  { id: "amazon_in", name: "Amazon", domains: ["amazon.in", "amzn.in", "amzn.to"], categories: ["general", "electronics", "books"], kind: "marketplace" },
-  { id: "flipkart", name: "Flipkart", domains: ["flipkart.com", "dl.flipkart.com"], categories: ["general", "electronics"], kind: "marketplace" },
-  { id: "croma", name: "Croma", domains: ["croma.com"], categories: ["electronics"], kind: "marketplace" },
-  { id: "reliance_digital", name: "Reliance Digital", domains: ["reliancedigital.in"], categories: ["electronics"], kind: "marketplace" },
-  { id: "vijay_sales", name: "Vijay Sales", domains: ["vijaysales.com"], categories: ["electronics"], kind: "marketplace" },
-  { id: "myntra", name: "Myntra", domains: ["myntra.com"], categories: ["fashion"], kind: "marketplace" },
-  { id: "ajio", name: "AJIO", domains: ["ajio.com"], categories: ["fashion"], kind: "marketplace" },
-  { id: "nykaa", name: "Nykaa", domains: ["nykaa.com", "nykaafashion.com"], categories: ["beauty", "fashion"], kind: "marketplace" },
-  { id: "tata_1mg", name: "Tata 1mg", domains: ["1mg.com"], categories: ["pharmacy"], kind: "marketplace" },
-  { id: "blinkit", name: "Blinkit", domains: ["blinkit.com"], categories: ["grocery"], kind: "quick_commerce" },
-  { id: "zepto", name: "Zepto", domains: ["zeptonow.com"], categories: ["grocery"], kind: "quick_commerce" },
-  { id: "bigbasket", name: "BigBasket", domains: ["bigbasket.com"], categories: ["grocery"], kind: "quick_commerce" },
-  { id: "meesho", name: "Meesho", domains: ["meesho.com"], categories: ["general", "fashion"], kind: "marketplace" },
-  { id: "snapdeal", name: "Snapdeal", domains: ["snapdeal.com"], categories: ["general"], kind: "marketplace" },
+  { id: "amazon_in", name: "Amazon", domains: ["amazon.in", "amzn.in", "amzn.to"], categories: ["general", "electronics", "books"], kind: "marketplace", packageHints: ["amazon"] },
+  { id: "flipkart", name: "Flipkart", domains: ["flipkart.com", "dl.flipkart.com"], categories: ["general", "electronics"], kind: "marketplace", packageHints: ["flipkart"] },
+  { id: "croma", name: "Croma", domains: ["croma.com"], categories: ["electronics"], kind: "marketplace", packageHints: ["croma"] },
+  { id: "reliance_digital", name: "Reliance Digital", domains: ["reliancedigital.in"], categories: ["electronics"], kind: "marketplace", packageHints: ["reliancedigital", "reliance.digital"] },
+  { id: "vijay_sales", name: "Vijay Sales", domains: ["vijaysales.com"], categories: ["electronics"], kind: "marketplace", packageHints: ["vijaysales"] },
+  { id: "myntra", name: "Myntra", domains: ["myntra.com"], categories: ["fashion"], kind: "marketplace", packageHints: ["myntra"] },
+  { id: "ajio", name: "AJIO", domains: ["ajio.com"], categories: ["fashion"], kind: "marketplace", packageHints: ["ajio"] },
+  { id: "nykaa", name: "Nykaa", domains: ["nykaa.com", "nykaafashion.com"], categories: ["beauty", "fashion"], kind: "marketplace", packageHints: ["nykaa"] },
+  { id: "tata_1mg", name: "Tata 1mg", domains: ["1mg.com"], categories: ["pharmacy"], kind: "marketplace", packageHints: ["tata1mg", "1mg"] },
+  // Blinkit has a real web catalog (blinkit.com) but blocks datacenter IPs
+  // aggressively - only Firecrawl's enhanced/residential proxy reliably gets in.
+  {
+    id: "blinkit",
+    name: "Blinkit",
+    domains: ["blinkit.com"],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "scrape",
+    antiBotStealth: true,
+    locationAware: true,
+    packageHints: ["blinkit", "grofers"],
+  },
+  // Zepto's web app (zeptonow.com) is a session-gated SPA: pricing comes from a
+  // per-session-signed internal API and even full-page render needs a delivery
+  // location picked first. A stateless scrape can't reliably get accurate,
+  // location-correct prices - deeplink-only avoids surfacing wrong prices.
+  {
+    id: "zepto",
+    name: "Zepto",
+    domains: ["zeptonow.com", "zepto.com"],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "deeplinkOnly",
+    // Confirmed working web search page (Next.js SPA route, no session needed).
+    searchUrl: (q) => `https://www.zepto.com/search?query=${encodeURIComponent(q)}`,
+    packageHints: ["zepto"],
+  },
+  // BigBasket's catalog is JS-heavy but has no aggressive anti-bot/IP blocking
+  // reported - basic Firecrawl scrape + extract works.
+  {
+    id: "bigbasket",
+    name: "BigBasket",
+    domains: ["bigbasket.com"],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "scrape",
+    locationAware: true,
+    packageHints: ["bigbasket"],
+  },
+  // Milkbasket is a subscription grocery app with no public web catalog - even
+  // browsing requires OTP login. No documented search page either, so the best
+  // we can offer is the marketing homepage (deeplink-only, no searchUrl).
+  {
+    id: "milkbasket",
+    name: "Milkbasket",
+    domains: ["milkbasket.com"],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "deeplinkOnly",
+    manualUrl: "https://www.milkbasket.com/",
+    packageHints: ["milkbasket"],
+  },
+  // Flipkart Minutes is currently just a tab inside the main Flipkart app (no
+  // standalone app/domain yet as of mid-2026) - no separate catalog to scrape.
+  // Falls back to Flipkart's own (documented) search page/deep-link domain.
+  {
+    id: "flipkart_minutes",
+    name: "Flipkart Minutes",
+    domains: [],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "deeplinkOnly",
+    manualUrl: "https://www.flipkart.com/",
+    searchUrl: (q) => `https://www.flipkart.com/search?q=${encodeURIComponent(q)}`,
+  },
+  // Swiggy Instamart has no official public API and no scrape-friendly public
+  // catalog (session/city gated, historically aggressive anti-bot), but its
+  // web search route is real and public - deeplink to that instead of scraping.
+  {
+    id: "swiggy_instamart",
+    name: "Swiggy Instamart",
+    domains: ["swiggy.com"],
+    categories: ["grocery"],
+    kind: "quick_commerce",
+    capability: "deeplinkOnly",
+    manualUrl: "https://www.swiggy.com/instamart",
+    searchUrl: (q) => `https://www.swiggy.com/instamart/search?query=${encodeURIComponent(q)}`,
+    packageHints: ["swiggy", "instamart"],
+  },
+  { id: "meesho", name: "Meesho", domains: ["meesho.com"], categories: ["general", "fashion"], kind: "marketplace", packageHints: ["meesho"] },
+  { id: "snapdeal", name: "Snapdeal", domains: ["snapdeal.com"], categories: ["general"], kind: "marketplace", packageHints: ["snapdeal"] },
   { id: "tatacliq", name: "Tata CLiQ", domains: ["tatacliq.com"], categories: ["general", "electronics"], kind: "marketplace" },
   { id: "ikea", name: "IKEA", domains: ["ikea.com"], categories: ["home"], kind: "marketplace" },
   { id: "pepperfry", name: "Pepperfry", domains: ["pepperfry.com"], categories: ["home"], kind: "marketplace" },
@@ -46,13 +162,13 @@ const IN_MARKETPLACES: Marketplace[] = [
 ];
 
 const US_MARKETPLACES: Marketplace[] = [
-  { id: "amazon_com", name: "Amazon", domains: ["amazon.com", "amzn.to", "a.co"], categories: ["general", "electronics", "books"], kind: "marketplace" },
-  { id: "walmart", name: "Walmart", domains: ["walmart.com"], categories: ["general", "electronics", "grocery"], kind: "marketplace" },
-  { id: "target", name: "Target", domains: ["target.com"], categories: ["general", "electronics", "home"], kind: "marketplace" },
-  { id: "bestbuy", name: "Best Buy", domains: ["bestbuy.com"], categories: ["electronics"], kind: "marketplace" },
-  { id: "ebay", name: "eBay", domains: ["ebay.com"], categories: ["general"], kind: "marketplace" },
-  { id: "instacart", name: "Instacart", domains: ["instacart.com"], categories: ["grocery"], kind: "quick_commerce" },
-  { id: "gopuff", name: "Gopuff", domains: ["gopuff.com"], categories: ["grocery"], kind: "quick_commerce" },
+  { id: "amazon_com", name: "Amazon", domains: ["amazon.com", "amzn.to", "a.co"], categories: ["general", "electronics", "books"], kind: "marketplace", packageHints: ["amazon"] },
+  { id: "walmart", name: "Walmart", domains: ["walmart.com"], categories: ["general", "electronics", "grocery"], kind: "marketplace", packageHints: ["walmart"] },
+  { id: "target", name: "Target", domains: ["target.com"], categories: ["general", "electronics", "home"], kind: "marketplace", packageHints: ["target"] },
+  { id: "bestbuy", name: "Best Buy", domains: ["bestbuy.com"], categories: ["electronics"], kind: "marketplace", packageHints: ["bestbuy"] },
+  { id: "ebay", name: "eBay", domains: ["ebay.com"], categories: ["general"], kind: "marketplace", packageHints: ["ebay"] },
+  { id: "instacart", name: "Instacart", domains: ["instacart.com"], categories: ["grocery"], kind: "quick_commerce", packageHints: ["instacart"] },
+  { id: "gopuff", name: "Gopuff", domains: ["gopuff.com"], categories: ["grocery"], kind: "quick_commerce", packageHints: ["gopuff"] },
 ];
 
 /** Per-country marketplace allowlists. */
@@ -115,6 +231,21 @@ export function isAllowedMarketplaceUrl(url: string, country?: Country): boolean
   return findMarketplace(url, country) !== null;
 }
 
+/**
+ * Identifies which marketplace's app the user is currently in from an Android
+ * package name (e.g. "com.amazon.mShop.android.shopping" -> amazon_in). Used by
+ * the screen-text identify flow to know the "current platform" for same-platform
+ * deal guards, since that flow only has a packageName, not a URL. Returns null
+ * when no marketplace's packageHints match - callers must not guess.
+ */
+export function marketplaceIdForPackage(packageName: string, country: Country = "IN"): string | null {
+  const pkg = packageName.toLowerCase();
+  for (const m of marketplacesFor(country)) {
+    if (m.packageHints?.some((h) => pkg.includes(h))) return m.id;
+  }
+  return null;
+}
+
 export function allMarketplaceDomains(country?: Country): string[] {
   const list = country ? marketplacesFor(country) : MARKETPLACES_FLAT;
   return list.flatMap((m) => m.domains);
@@ -128,4 +259,34 @@ export function priceRegexFor(country: Country): RegExp {
   return country === "US"
     ? /(?:\$|USD\s*)[\d,]+(?:\.\d{1,2})?/i
     : /(?:₹|Rs\.?\s*|INR\s*)[\d,]+(?:\.\d{1,2})?/i;
+}
+
+/** True unless explicitly marked deeplinkOnly - default preserves pre-existing scrape behavior. */
+export function isScrapeCapable(m: Marketplace): boolean {
+  return m.capability !== "deeplinkOnly";
+}
+
+export function scrapeMarketplacesFor(country: Country = "IN"): Marketplace[] {
+  return marketplacesFor(country).filter(isScrapeCapable);
+}
+
+export function deeplinkOnlyMarketplacesFor(country: Country = "IN"): Marketplace[] {
+  return marketplacesFor(country).filter((m) => !isScrapeCapable(m));
+}
+
+/**
+ * Real destination URL for a deeplinkOnly marketplace's "check manually" offer.
+ * Prefers a documented in-app search URL for the product (so the user lands on
+ * relevant results, not the bare homepage); falls back to a web search scoped to
+ * the platform's domain when no search URL is documented for it; only falls
+ * back to the plain homepage when no query is given at all.
+ */
+export function manualUrlFor(m: Marketplace, query?: string): string {
+  if (query && query.trim()) {
+    if (m.searchUrl) return m.searchUrl(query.trim());
+    if (m.domains[0]) {
+      return `https://www.google.com/search?q=${encodeURIComponent(`site:${m.domains[0]} ${query.trim()}`)}`;
+    }
+  }
+  return m.manualUrl ?? (m.domains[0] ? `https://${m.domains[0]}` : "");
 }

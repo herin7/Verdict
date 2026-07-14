@@ -14,6 +14,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassCard } from "../components/GlassCard";
 import { Tappable } from "../components/Tappable";
 import { Badge } from "../components/Badge";
@@ -28,7 +29,7 @@ import {
   ScamDetectorContent,
   VersionHistoryContent,
 } from "../components/InsightContent";
-import { colors, font, fonts, goldGradient, radius, verdictColor, verdictGradient, verdictLabel } from "../theme";
+import { colors, font, fonts, goldGradient, radius, space, verdictColor, verdictGradient, verdictLabel } from "../theme";
 import { findBuyLinks, getInsight } from "../api/client";
 import { openRetailer } from "../deeplink";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
@@ -90,6 +91,7 @@ export function ReportScreen({
   const color = verdictColor[report.verdict];
   const shotRef = useRef<ViewShotRef>(null);
   const [altBuy, setAltBuy] = useState<Record<number, AltBuyState>>({});
+  const insets = useSafeAreaInsets();
 
   async function findAltBuyLinks(i: number, altName: string) {
     setAltBuy((s) => ({ ...s, [i]: { loading: true } }));
@@ -120,7 +122,14 @@ export function ReportScreen({
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + space(3), paddingBottom: space(10) + insets.bottom },
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.header}>
         <Tappable onPress={onBack} style={styles.iconBtn}>
           <Ionicons name="chevron-back" size={20} color={colors.text} />
@@ -575,7 +584,7 @@ function ExpandableAlternatives({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 20, paddingTop: 60, gap: 14, paddingBottom: 56 },
+  content: { paddingHorizontal: space(5), gap: 14 },
 
   header: { flexDirection: "row", alignItems: "center", gap: 10 },
   iconBtn: {

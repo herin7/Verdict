@@ -71,6 +71,12 @@ const CHROME = [
 
 const ASIN_RE = /\b(B0[A-Z0-9]{8})\b/i;
 
+/** Presence (anywhere in the raw dump) is a strong PDP signal, even though the exact button token itself is chrome noise. */
+const BUY_BOX_RE = /\b(add to cart|buy now|buy it now|proceed to buy|place order)\b/i;
+
+/** A short "Category > Subcategory > ..." trail, as Amazon/Flipkart render above the title. */
+const BREADCRUMB_RE = /(?:^|\n)\s*[\w][\w &'/-]{1,30}(?:\s*[>›]\s*[\w][\w &'/-]{1,30}){1,5}/;
+
 function isChrome(token: string): boolean {
   const t = token.trim();
   if (t.length < 2) return true;
@@ -86,11 +92,17 @@ export function cleanScreenText(
   cleaned: string;
   asin: string | null;
   priceHint: string | null;
+  /** An Add to Cart / Buy Now / Place Order button is present - strong evidence of a real PDP, not a feed/search page. */
+  hasBuyBox: boolean;
+  /** A "Category > Subcategory" breadcrumb trail is present - another PDP signal. */
+  hasBreadcrumb: boolean;
 } {
   const c = normalizeCountry(country);
   const priceRe = priceRegexFor(c);
   const asin = raw.match(ASIN_RE)?.[1]?.toUpperCase() ?? null;
   const priceHint = raw.match(priceRe)?.[0] ?? null;
+  const hasBuyBox = BUY_BOX_RE.test(raw);
+  const hasBreadcrumb = BREADCRUMB_RE.test(raw);
 
   const parts = raw
     .split(/[\n\r|•·]+|(?:\s{2,})/)
@@ -131,5 +143,5 @@ export function cleanScreenText(
   });
 
   const cleaned = ranked.slice(0, 40).join("\n").slice(0, 3500);
-  return { cleaned: cleaned || raw.trim().slice(0, 3500), asin, priceHint };
+  return { cleaned: cleaned || raw.trim().slice(0, 3500), asin, priceHint, hasBuyBox, hasBreadcrumb };
 }

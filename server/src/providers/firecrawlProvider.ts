@@ -25,8 +25,11 @@ export const firecrawlProvider: ResearchProvider = {
     return firecrawlScrape(url);
   },
 
-  async extractStructured(url: string): Promise<StructuredProductData | null> {
+  async extractStructured(
+    url: string,
+    opts?: { proxy?: "basic" | "enhanced" | "auto"; location?: { country: string; languages?: string[] } }
+  ): Promise<StructuredProductData | null> {
     if (!firecrawlEnabled()) return null;
-    return firecrawlExtract(url);
+    return firecrawlExtract(url, opts);
   },
 };

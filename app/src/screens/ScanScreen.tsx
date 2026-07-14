@@ -4,13 +4,15 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Tappable } from "../components/Tappable";
 import { ProductThumb, type ThumbStatus } from "../components/ProductThumb";
 import { FadeIn } from "../components/FadeIn";
 import { ScannerFrame } from "../components/ScannerFrame";
 import { ResearchingScreen } from "../components/ResearchingScreen";
-import { colors, fonts, goldGradient, radius } from "../theme";
+import { colors, fonts, goldGradient, radius, space } from "../theme";
 import { getProductImage, identify, identifyScreen, identifyUrl, research } from "../api/client";
+import { track } from "../analytics/posthog";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -33,6 +35,7 @@ export function ScanScreen({
   initialScreenText?: { text: string; packageName: string } | null;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
+  const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [product, setProduct] = useState<ProductIdentity | null>(null);
@@ -91,6 +94,7 @@ export function ScanScreen({
     if (initialUrl?.trim()) {
       setPasteUrl(initialUrl);
       setStage("paste");
+      track("scan_started", { method: "share" });
       void (async () => {
         setError(null);
         setStage("identifying");
@@ -100,6 +104,7 @@ export function ScanScreen({
           setStage("confirm");
           setThumbStatus("loading");
           setProductImageUrl(null);
+          track("scan_identify_success", { method: "share", category: p.category });
           const requestId = ++imageRequestId.current;
           getProductImage(p).then((u) => {
             if (imageRequestId.current !== requestId) return;
@@ -109,6 +114,7 @@ export function ScanScreen({
         } catch (e) {
           setError((e as Error).message);
           setStage("paste");
+          track("scan_identify_failed", { method: "share" });
         }
       })();
     }
@@ -159,6 +165,7 @@ export function ScanScreen({
 
   async function capture() {
     setError(null);
+    track("scan_started", { method: "camera" });
     // React the instant the shutter is tapped - don't wait on takePictureAsync to resolve.
     goTo("identifying");
     let base64: string | null = null;
@@ -183,6 +190,7 @@ export function ScanScreen({
       const p = await identify(base64);
       setProduct(p);
       goTo("confirm");
+      track("scan_identify_success", { method: "camera", category: p.category });
 
       setThumbStatus("loading");
       setProductImageUrl(null);
@@ -196,18 +204,21 @@ export function ScanScreen({
     } catch (e) {
       setError((e as Error).message);
       goTo("identifyFailed");
+      track("scan_identify_failed", { method: "camera" });
     }
   }
 
   async function runIdentifyFromScreen(payload: { text: string; packageName: string }) {
     setError(null);
     goTo("identifying");
+    track("scan_started", { method: "overlay" });
     try {
-      const p = await identifyScreen(payload.text, payload.packageName);
+      const { product: p } = await identifyScreen(payload.text, payload.packageName);
       setProduct(p);
       setCapturedUri(null);
       setCapturedBase64(null);
       goTo("confirm");
+      track("scan_identify_success", { method: "overlay", category: p.category });
       setThumbStatus("loading");
       setProductImageUrl(null);
       const requestId = ++imageRequestId.current;
@@ -219,18 +230,21 @@ export function ScanScreen({
     } catch (e) {
       setError((e as Error).message);
       goTo("identifyFailed");
+      track("scan_identify_failed", { method: "overlay" });
     }
   }
 
   async function runIdentifyUrl(url: string) {
     setError(null);
     goTo("identifying");
+    track("scan_started", { method: "paste" });
     try {
       const { product: p } = await identifyUrl(url.trim());
       setProduct(p);
       setCapturedUri(null);
       setCapturedBase64(null);
       goTo("confirm");
+      track("scan_identify_success", { method: "paste", category: p.category });
       setThumbStatus("loading");
       setProductImageUrl(null);
       const requestId = ++imageRequestId.current;
@@ -242,6 +256,7 @@ export function ScanScreen({
     } catch (e) {
       setError((e as Error).message);
       goTo("paste");
+      track("scan_identify_failed", { method: "paste" });
     }
   }
 
@@ -289,19 +304,19 @@ export function ScanScreen({
         </View>
       )}
 
-      <View style={styles.topBar} pointerEvents="box-none">
+      <View style={[styles.topBar, { paddingTop: insets.top + space(3) }]} pointerEvents="box-none">
         <View style={styles.brandPillWrap}>
           <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
           <Ionicons name="flash" size={12} color={colors.accent} />
           <Text style={styles.brand}>Verdict</Text>
         </View>
-        <Tappable onPress={onHome} style={styles.homeBtnWrap}>
+        <Tappable onPress={onHome} style={styles.homeBtnWrap} hitSlop={6}>
           <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
           <Ionicons name="home-outline" size={18} color={colors.text} />
         </Tappable>
       </View>
 
-      <View style={styles.sheetWrap}>
+      <View style={[styles.sheetWrap, { paddingBottom: insets.bottom + space(6) }]}>
         <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.sheetHandle} />
 
@@ -492,7 +507,6 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 58,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
@@ -547,7 +561,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingTop: 12,
     paddingHorizontal: 20,
-    paddingBottom: 40,
     gap: 14,
     borderTopWidth: 1,
     borderColor: "rgba(255,215,109,0.14)",

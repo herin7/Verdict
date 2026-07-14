@@ -8,7 +8,8 @@ import { FadeIn } from "../components/FadeIn";
 import { AnimatedCounter } from "../components/AnimatedCounter";
 import { CategoryIcon } from "../components/Icons";
 import { Badge } from "../components/Badge";
-import { colors, fonts, goldGradient, radius, verdictColor, verdictLabel } from "../theme";
+import { EmptyState, IconButton, Screen, SectionHeader } from "../components/ui";
+import { colors, fonts, goldGradient, radius, space, verdictColor, verdictLabel } from "../theme";
 import type { SavedReport } from "../types";
 
 function greeting(): string {
@@ -48,9 +49,11 @@ export function DashboardScreen({
   savedCount,
   recent,
   onScan,
+  onSearch,
   onLibrary,
   onPayments,
   onOverlay,
+  onMissions,
   onOpenReport,
   onLogout,
 }: {
@@ -59,9 +62,11 @@ export function DashboardScreen({
   savedCount: number;
   recent: SavedReport[];
   onScan: () => void;
+  onSearch?: () => void;
   onLibrary: () => void;
   onPayments?: () => void;
   onOverlay?: () => void;
+  onMissions?: () => void;
   onOpenReport: (entry: SavedReport) => void;
   onLogout: () => void;
 }) {
@@ -83,7 +88,7 @@ export function DashboardScreen({
   const recentItems = recent.slice(0, 6);
 
   return (
-    <View style={styles.screen}>
+    <Screen style={styles.screen} padded={false}>
       <Orb style={styles.orbTopRight} />
       <Orb style={styles.orbBottomLeft} delay={900} />
 
@@ -96,9 +101,7 @@ export function DashboardScreen({
                 {username}
               </Text>
             </View>
-            <Tappable onPress={onLogout} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={18} color={colors.textMuted} />
-            </Tappable>
+            <IconButton icon="log-out-outline" color={colors.textMuted} onPress={onLogout} />
           </View>
         </FadeIn>
 
@@ -141,6 +144,23 @@ export function DashboardScreen({
           </Tappable>
         </FadeIn>
 
+        {onSearch && (
+          <FadeIn duration={360} delay={185}>
+            <Tappable onPress={onSearch}>
+              <GlassCard style={styles.actionCardGlass}>
+                <View style={styles.actionIconWrapGlass}>
+                  <Ionicons name="search-outline" size={20} color={colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionTitleGlass}>Direct Search</Text>
+                  <Text style={styles.actionSubGlass}>Type a product to compare instantly</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+              </GlassCard>
+            </Tappable>
+          </FadeIn>
+        )}
+
         <FadeIn duration={360} delay={200}>
           <Tappable onPress={onLibrary}>
             <GlassCard style={styles.actionCardGlass}>
@@ -155,6 +175,23 @@ export function DashboardScreen({
             </GlassCard>
           </Tappable>
         </FadeIn>
+
+        {onMissions && (
+          <FadeIn duration={360} delay={220}>
+            <Tappable onPress={onMissions}>
+              <GlassCard style={styles.actionCardGlass}>
+                <View style={styles.actionIconWrapGlass}>
+                  <Ionicons name="rocket-outline" size={20} color={colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionTitleGlass}>Shopping Missions</Text>
+                  <Text style={styles.actionSubGlass}>Agent proposes, you approve</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+              </GlassCard>
+            </Tappable>
+          </FadeIn>
+        )}
 
         {onPayments && (
           <FadeIn duration={360} delay={230}>
@@ -192,15 +229,10 @@ export function DashboardScreen({
 
         <FadeIn duration={360} delay={260}>
           <View style={styles.recentSection}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="time-outline" size={14} color={colors.textFaint} />
-              <Text style={styles.sectionTitle}>Recently researched</Text>
-            </View>
+            <SectionHeader title="Recently researched" icon="time-outline" />
 
             {recentItems.length === 0 ? (
-              <View style={styles.emptyRecent}>
-                <Text style={styles.emptyRecentText}>Your first scan will show up here.</Text>
-              </View>
+              <EmptyState icon="scan-outline" message="Your first scan will show up here." />
             ) : (
               <ScrollView
                 horizontal
@@ -233,13 +265,13 @@ export function DashboardScreen({
           </View>
         </FadeIn>
       </ScrollView>
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  scrollContent: { paddingTop: 64, paddingHorizontal: 20, paddingBottom: 36 },
+  scrollContent: { paddingTop: space(3), paddingHorizontal: space(5), paddingBottom: space(9) },
 
   orb: {
     position: "absolute",

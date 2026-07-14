@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "../components/Tappable";
-import { PillButton } from "../components/ui";
+import { Divider, PillButton, Screen, ScreenHeader, SectionHeader } from "../components/ui";
 import { colors, fonts, radius, space } from "../theme";
 import { WATCHED_SHOPPING_APPS } from "../overlayApps";
 import { detectCountry, getCountry, setCountry, type Country } from "../country";
@@ -19,6 +19,7 @@ import {
   isAccessibilitySupported,
   openAccessibilitySettings,
 } from "verdict-accessibility";
+import { track } from "../analytics/posthog";
 
 export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
   const [overlayOk, setOverlayOk] = useState(false);
@@ -45,25 +46,26 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
   const onSelectCountry = async (next: Country) => {
     setCountryState(next);
     await setCountry(next);
+    track("country_changed", { country: next });
   };
 
   if (Platform.OS !== "android") {
     return (
-      <View style={styles.screen}>
-        <Header onBack={onBack} />
+      <Screen>
+        <ScreenHeader title="Shopping overlay" onBack={onBack} />
         <Text style={styles.body}>
           Shopping overlay is Android-only. iOS Share Extension comes in a later cycle.
         </Text>
-      </View>
+      </Screen>
     );
   }
 
   const ready = overlayOk && a11yOn;
 
   return (
-    <View style={styles.screen}>
-      <Header onBack={onBack} />
-      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 40 }}>
+    <Screen>
+      <ScreenHeader title="Shopping overlay" onBack={onBack} />
+      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: space(10) }}>
         <Text style={styles.body}>
           Open a shopping app and Verdict appears automatically. Tap the bubble to research what is
           on screen. No screen casting. No recording prompt.
@@ -81,7 +83,7 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
           </View>
         )}
 
-        <Text style={styles.sectionTitle}>1. Accessibility</Text>
+        <SectionHeader title="1. Accessibility" />
         <Text style={styles.disclosure}>
           Reads on-screen text from shopping apps only. Never taps, types, or controls other apps.
         </Text>
@@ -94,7 +96,7 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
           />
         )}
 
-        <Text style={styles.sectionTitle}>2. Display over other apps</Text>
+        <SectionHeader title="2. Display over other apps" />
         <Text style={styles.disclosure}>Lets Verdict show a floating bubble while you shop.</Text>
         {isOverlaySupported && (
           <Row
@@ -127,9 +129,9 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
           />
         )}
 
-        <View style={styles.divider} />
+        <Divider />
 
-        <Text style={styles.sectionTitle}>Country</Text>
+        <SectionHeader title="Country" />
         <Text style={styles.disclosure}>
           Prices and marketplaces follow this. Auto from device locale; override anytime.
         </Text>
@@ -147,9 +149,9 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
         </View>
         <Text style={styles.rowSub}>Detected locale default: {detectCountry()}</Text>
 
-        <View style={styles.divider} />
+        <Divider />
 
-        <Text style={styles.sectionTitle}>Watched apps</Text>
+        <SectionHeader title="Watched apps" />
         <Text style={styles.disclosure}>
           Verdict only reads these. Everything else (messages, banking, gallery, personal apps) is
           blocked by construction.
@@ -172,19 +174,7 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
           </Text>
         </View>
       </ScrollView>
-    </View>
-  );
-}
-
-function Header({ onBack }: { onBack: () => void }) {
-  return (
-    <View style={styles.header}>
-      <Tappable onPress={onBack} style={styles.backBtn}>
-        <Ionicons name="chevron-back" size={20} color={colors.text} />
-      </Tappable>
-      <Text style={styles.title}>Shopping overlay</Text>
-      <View style={{ width: 36 }} />
-    </View>
+    </Screen>
   );
 }
 
@@ -215,17 +205,6 @@ function Row({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20, paddingTop: 8 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surface,
-  },
-  title: { fontFamily: fonts.serif, fontSize: 22, color: colors.text },
   body: { fontFamily: fonts.sans, fontSize: 14, color: colors.textMuted, lineHeight: 20 },
   sectionTitle: { fontFamily: fonts.serif, fontSize: 18, color: colors.text, marginTop: 4 },
   disclosure: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
