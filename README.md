@@ -27,6 +27,16 @@ Every scan runs 8 parallel Anakin `Search` calls (one per source type) then an A
 - `app/` - Expo (React Native, TS) app with camera scan, paste-link, payment profile, compare/deals UI
   - Android floating overlay (custom native module) + share-intent (requires EAS/dev-client build)
 
+## AI provider architecture
+
+All LLM calls (`server/src/claude.ts`) go through one gateway (`server/src/ai/gateway.ts`) instead of talking to Anthropic directly. Each workload (`identify_image`, `report`, `insight_*`, etc.) resolves an ordered provider chain and tries each until one succeeds.
+
+- `AI_POLICY` (JSON env, e.g. `{"identify_screen":["bedrock","anthropic"]}`) sets the per-workload chain. Unset today = every workload is `["anthropic"]` only - zero behavior change.
+- `BEDROCK_REGION` enables the Bedrock provider (unset = Bedrock disabled entirely, chain falls through to Anthropic).
+- `BEDROCK_MODEL_MAP` (JSON env, e.g. `{"identify_screen":"amazon.nova-lite-v1:0"}`) maps workload -> Bedrock model id. A workload with no entry can't run on Bedrock even if listed in `AI_POLICY`.
+
+Anthropic is always the default and last-resort fallback; Bedrock is opt-in per workload. To try Bedrock on one workload: set `BEDROCK_REGION`, add that workload to `BEDROCK_MODEL_MAP`, then add `["bedrock","anthropic"]` for it in `AI_POLICY`. Rollback is deleting/editing that env var, no code change.
+
 ## Run
 
 Backend:
