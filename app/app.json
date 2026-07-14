@@ -38,7 +38,10 @@
       [
         "expo-share-intent",
         {
-          "androidIntentFilters": ["text/*", "image/*"],
+          "androidIntentFilters": [
+            "text/*",
+            "image/*"
+          ],
           "iosActivationRules": {
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsText": true
@@ -46,7 +49,8 @@
         }
       ],
       "./modules/verdict-overlay/app.plugin.js",
-      "./modules/verdict-accessibility/app.plugin.js"
+      "./modules/verdict-accessibility/app.plugin.js",
+      "expo-localization"
     ]
   }
 }

@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { getAccessToken } from "../lib/supabase";
+import { getCountry } from "../country";
 import type {
   BestInCategory,
   BuyLink,
@@ -33,6 +34,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function withCountry<T extends Record<string, unknown>>(body: T): Promise<T & { country: string }> {
+  const country = await getCountry();
+  return { ...body, country };
+}
+
 export async function identify(imageBase64: string): Promise<ProductIdentity> {
   const json = await api<{ product: ProductIdentity }>("/identify", {
     method: "POST",
@@ -51,7 +57,7 @@ export async function research(
     cached?: boolean;
   }>("/research", {
     method: "POST",
-    body: JSON.stringify({ product }),
+    body: JSON.stringify(await withCountry({ product })),
   });
   return {
     report: json.report,
@@ -158,7 +164,7 @@ export async function identifyUrl(url: string): Promise<{
 export async function identifyScreen(text: string, packageName: string): Promise<ProductIdentity> {
   const json = await api<{ product: ProductIdentity }>("/identify-screen", {
     method: "POST",
-    body: JSON.stringify({ text, packageName }),
+    body: JSON.stringify(await withCountry({ text, packageName })),
   });
   return json.product;
 }
@@ -170,7 +176,7 @@ export async function compareEverywhere(product: ProductIdentity, gtin?: string 
     cached: boolean;
   }>("/compare", {
     method: "POST",
-    body: JSON.stringify({ product, gtin: gtin ?? null }),
+    body: JSON.stringify(await withCountry({ product, gtin: gtin ?? null })),
   });
 }
 
@@ -182,7 +188,7 @@ export async function fetchDeals(product: ProductIdentity, methods?: string[]) {
     methodsUsed: string[];
   }>("/deals", {
     method: "POST",
-    body: JSON.stringify({ product, methods }),
+    body: JSON.stringify(await withCountry({ product, methods })),
   });
 }
 
