@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { decodeJwt } from "jose";
 import { config } from "./config.js";
+import { shutdownPosthog } from "./analytics/posthog.js";
 import { authPlugin } from "./auth/plugin.js";
 import { identifyRoute } from "./routes/identify.js";
 import { identifyUrlRoute } from "./routes/identifyUrl.js";
@@ -47,6 +48,32 @@ await app.register(rateLimit, {
   keyGenerator: rateLimitKey,
 });
 await app.register(authPlugin);
+
+app.addHook("onRequest", async (req) => {
+  req.log.info({ requestId: req.id, method: req.method, url: req.url }, "request_start");
+});
+
+app.addHook("onResponse", async (req, reply) => {
+  req.log.info(
+    {
+      requestId: req.id,
+      method: req.method,
+      route: req.routeOptions.url ?? req.url,
+      statusCode: reply.statusCode,
+      latencyMs: reply.elapsedTime,
+      userId: req.user?.id,
+      device: req.headers["x-device"],
+      appVersion: req.headers["x-app-version"],
+      networkType: req.headers["x-network-type"],
+    },
+    "request_end"
+  );
+});
+
+app.addHook("onClose", async () => {
+  await shutdownPosthog();
+});
+
 await app.register(identifyRoute);
 await app.register(identifyUrlRoute);
 await app.register(identifyScreenRoute);
