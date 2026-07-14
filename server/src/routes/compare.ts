@@ -38,11 +38,23 @@ export async function compareRoute(app: FastifyInstance) {
         confidence: p.confidence ?? 1,
         searchTerm: p.searchTerm ?? p.name,
       };
+      const start = Date.now();
       try {
         const result = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
         });
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            cache: result.cached ? "hit" : "miss",
+            latencyMs: Date.now() - start,
+            offerCount: result.offers.length,
+            ok: true,
+          },
+          "compare_outcome"
+        );
         return {
           offers: result.offers,
           productId: result.productId,
@@ -51,6 +63,16 @@ export async function compareRoute(app: FastifyInstance) {
         };
       } catch (err) {
         req.log.error(err);
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            latencyMs: Date.now() - start,
+            ok: false,
+            error: (err as Error).message,
+          },
+          "compare_outcome"
+        );
         return reply.code(502).send({ error: (err as Error).message });
       }
     }

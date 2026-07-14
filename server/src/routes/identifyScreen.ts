@@ -29,6 +29,7 @@ export async function identifyScreenRoute(app: FastifyInstance) {
       if (!parsed.success) {
         return reply.code(400).send({ error: "text is required" });
       }
+      const start = Date.now();
       try {
         const country = normalizeCountry(parsed.data.country);
         const raw = validateScreenText(parsed.data.text);
@@ -64,9 +65,23 @@ export async function identifyScreenRoute(app: FastifyInstance) {
             code: "low_confidence",
           });
         }
+        req.log.info(
+          { requestId: req.id, userId: req.user?.id, latencyMs: Date.now() - start, ok: true },
+          "identify_screen_outcome"
+        );
         return { product, country };
       } catch (err) {
         if (err instanceof ValidationError) {
+          req.log.info(
+            {
+              requestId: req.id,
+              userId: req.user?.id,
+              latencyMs: Date.now() - start,
+              ok: false,
+              error: err.code,
+            },
+            "identify_screen_outcome"
+          );
           if (err.code !== "low_confidence" && err.code !== "text_too_short") {
             const { banned } = await recordViolation(req, err.rejectReason ?? err.code);
             if (banned) {
@@ -83,6 +98,16 @@ export async function identifyScreenRoute(app: FastifyInstance) {
           });
         }
         req.log.error(err);
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            latencyMs: Date.now() - start,
+            ok: false,
+            error: (err as Error).message,
+          },
+          "identify_screen_outcome"
+        );
         return reply.code(502).send({ error: (err as Error).message });
       }
     }

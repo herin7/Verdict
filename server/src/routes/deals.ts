@@ -68,12 +68,24 @@ export async function dealsRoute(app: FastifyInstance) {
         methods = await getPaymentProfile(req.user!.id).catch(() => [] as PaymentMethodId[]);
       }
 
+      const start = Date.now();
       try {
         const compare = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
         });
         const ranked = country === "US" ? [] : calculateDeals(compare.offers, methods);
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            cache: compare.cached ? "hit" : "miss",
+            latencyMs: Date.now() - start,
+            dealCount: ranked.length,
+            ok: true,
+          },
+          "deals_outcome"
+        );
         return {
           deals: ranked,
           offers: compare.offers,
@@ -84,6 +96,16 @@ export async function dealsRoute(app: FastifyInstance) {
         };
       } catch (err) {
         req.log.error(err);
+        req.log.info(
+          {
+            requestId: req.id,
+            userId: req.user?.id,
+            latencyMs: Date.now() - start,
+            ok: false,
+            error: (err as Error).message,
+          },
+          "deals_outcome"
+        );
         return reply.code(502).send({ error: (err as Error).message });
       }
     }

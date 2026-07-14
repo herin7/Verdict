@@ -22,8 +22,19 @@ export async function researchRoute(app: FastifyInstance) {
       searchTerm: parsed.data.name,
       ...parsed.data,
     };
+    const start = Date.now();
     try {
       const result = await researchProduct(product, { userId: req.user?.id });
+      req.log.info(
+        {
+          requestId: req.id,
+          userId: req.user?.id,
+          cache: result.cached ? "hit" : "miss",
+          latencyMs: Date.now() - start,
+          ok: true,
+        },
+        "research_outcome"
+      );
       return {
         report: result.report,
         buyLinks: result.buyLinks,
@@ -32,6 +43,16 @@ export async function researchRoute(app: FastifyInstance) {
       };
     } catch (err) {
       req.log.error(err);
+      req.log.info(
+        {
+          requestId: req.id,
+          userId: req.user?.id,
+          latencyMs: Date.now() - start,
+          ok: false,
+          error: (err as Error).message,
+        },
+        "research_outcome"
+      );
       if (err instanceof AnakinCreditError) {
         return reply.code(402).send({ error: err.message, code: "out_of_credits" });
       }
