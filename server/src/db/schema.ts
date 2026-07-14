@@ -146,3 +146,28 @@ export const paymentProfiles = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   }
 );
+
+/** Autonomous shopping missions - agent proposes, human approves. */
+export const shoppingMissions = pgTable(
+  "shopping_missions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    title: text("title").notNull(),
+    goal: text("goal").notNull(),
+    status: text("status").notNull().default("draft"),
+    country: text("country").notNull().default("IN"),
+    constraints: jsonb("constraints").notNull().default({}),
+    product: jsonb("product"),
+    proposal: jsonb("proposal"),
+    monitorId: text("monitor_id"),
+    events: jsonb("events").notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("shopping_missions_user_idx").on(t.userId),
+    index("shopping_missions_user_status_idx").on(t.userId, t.status),
+    index("shopping_missions_monitor_idx").on(t.monitorId),
+  ]
+);
