@@ -76,4 +76,9 @@ export const config = {
   bedrockModelMap: optionalJson<BedrockModelMap>("BEDROCK_MODEL_MAP", {}),
   /** Workload -> ordered provider chain, e.g. {"identify_screen":["bedrock","anthropic"]}. Missing workloads fall back to anthropic-only. */
   aiPolicy: { ...DEFAULT_AI_POLICY, ...optionalJson<AiPolicy>("AI_POLICY", {}) } as AiPolicy,
+
+  /** PostHog server-side analytics. Unset = fully disabled, zero behavior change. */
+  posthogApiKey: optional("POSTHOG_API_KEY"),
+  posthogHost: optional("POSTHOG_HOST", "https://us.i.posthog.com"),
+  posthogEnabled: Boolean(process.env.POSTHOG_API_KEY?.trim()),
 };
