@@ -10,8 +10,7 @@
     "web": "expo start --web",
     "prebuild:android": "expo prebuild --platform android",
     "run:android": "expo run:android",
-    "eas:dev": "eas build --profile development --platform android",
-    "postinstall": "patch-package"
+    "eas:dev": "eas build --profile development --platform android"
   },
   "dependencies": {
     "@expo-google-fonts/arimo": "^0.4.3",
@@ -58,7 +57,6 @@
     "@types/aes-js": "^3.1.4",
     "@types/react": "~19.2.3",
     "babel-preset-expo": "^56.0.17",
-    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "overrides": {
