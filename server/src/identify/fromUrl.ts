@@ -7,12 +7,19 @@ import { ProductIdentitySchema, type ProductIdentity } from "../schema.js";
 import { coerceToSchema } from "../coerce.js";
 import { callToolIdentifyFromText } from "./llmFallback.js";
 
+export interface UrlIdentifyStructured {
+  gtin: string | null;
+  price: string | null;
+  currency: string | null;
+  marketplaceId: string | null;
+}
+
 export interface UrlIdentifyResult {
   product: ProductIdentity;
   sourceUrl: string;
   marketplaceId: string | null;
   method: "deterministic" | "llm";
-  structured: Record<string, unknown>;
+  structured: UrlIdentifyStructured;
 }
 
 const GTIN_RE = /\b(\d{8}|\d{12}|\d{13}|\d{14})\b/;

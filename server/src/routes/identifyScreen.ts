@@ -7,7 +7,8 @@ import { recordViolation } from "../guard/abuse.js";
 import { callToolIdentifyFromScreenText } from "../identify/llmFallback.js";
 import { MIN_IDENTIFY_CONFIDENCE } from "../guard/validation.js";
 import { cleanScreenText } from "../identify/screenText.js";
-import { normalizeCountry } from "../marketplaces/registry.js";
+import { currencyFor, marketplaceIdForPackage, normalizeCountry } from "../marketplaces/registry.js";
+import { toReferencePrice } from "../marketplaces/normalize.js";
 
 const BodySchema = z.object({
   text: z.string().min(1),
@@ -33,15 +34,18 @@ export async function identifyScreenRoute(app: FastifyInstance) {
       try {
         const country = normalizeCountry(parsed.data.country);
         const raw = validateScreenText(parsed.data.text);
-        const { cleaned, asin, priceHint } = cleanScreenText(raw, country);
+        const { cleaned, asin, priceHint, hasBuyBox, hasBreadcrumb } = cleanScreenText(raw, country);
         req.log.info(
           {
+            requestId: req.id,
             pkg: parsed.data.packageName,
             country,
             rawLen: raw.length,
             cleanLen: cleaned.length,
-            asin,
-            preview: cleaned.slice(0, 180),
+            hasAsin: Boolean(asin),
+            hasPriceHint: Boolean(priceHint),
+            hasBuyBox,
+            hasBreadcrumb,
           },
           "identify-screen input"
         );
@@ -50,13 +54,17 @@ export async function identifyScreenRoute(app: FastifyInstance) {
           packageName: parsed.data.packageName,
           asin,
           priceHint,
+          hasBuyBox,
+          hasBreadcrumb,
         });
         if (product.confidence < MIN_IDENTIFY_CONFIDENCE) {
           req.log.warn(
             {
+              requestId: req.id,
               confidence: product.confidence,
-              name: product.name,
-              searchTerm: product.searchTerm,
+              category: product.category ?? null,
+              hasName: Boolean(product.name),
+              hasSearchTerm: Boolean(product.searchTerm),
             },
             "identify-screen low confidence"
           );
@@ -69,7 +77,14 @@ export async function identifyScreenRoute(app: FastifyInstance) {
           { requestId: req.id, userId: req.user?.id, latencyMs: Date.now() - start, ok: true },
           "identify_screen_outcome"
         );
-        return { product, country };
+        // The price already visible on the user's screen right now - the
+        // authoritative baseline for compare/deals, never to be overridden by a
+        // later re-scrape of the same platform. sourceMarketplaceId (best-effort,
+        // from the app's package name) lets compare/deals recognize when a
+        // re-scraped "competing" offer is actually the same listing.
+        const sourceMarketplaceId = marketplaceIdForPackage(parsed.data.packageName, country);
+        const referencePrice = toReferencePrice(priceHint, null, sourceMarketplaceId, currencyFor(country));
+        return { product, country, referencePrice };
       } catch (err) {
         if (err instanceof ValidationError) {
           req.log.info(
