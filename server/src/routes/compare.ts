@@ -17,6 +17,17 @@ const BodySchema = z.object({
   }),
   gtin: z.string().nullable().optional(),
   country: z.enum(["IN", "US"]).optional(),
+  location: z.object({ lat: z.number(), lon: z.number() }).optional(),
+  /** Live price already on the user's screen for this exact product - see
+   *  services/compare.ts applyReferenceGuard for how this is used. */
+  reference: z
+    .object({
+      amount: z.number().positive(),
+      currency: z.string().min(1),
+      retailerId: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export async function compareRoute(app: FastifyInstance) {
@@ -43,6 +54,8 @@ export async function compareRoute(app: FastifyInstance) {
         const result = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
+          location: parsed.data.location ?? null,
+          reference: parsed.data.reference ?? null,
         });
         req.log.info(
           {

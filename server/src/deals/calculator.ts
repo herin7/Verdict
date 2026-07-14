@@ -1,4 +1,4 @@
-import type { MarketplaceOffer } from "../marketplaces/normalize.js";
+import type { MarketplaceOffer, ReferencePrice } from "../marketplaces/normalize.js";
 import {
   OFFER_RULES,
   isRuleActive,
@@ -20,6 +20,39 @@ export interface RankedDeal {
   totalSavings: number;
   applied: AppliedDeal[];
   methodUsed: PaymentMethodId | null;
+  /**
+   * True when this offer's price has been verified as a genuine improvement
+   * over the caller-supplied reference (on-screen) price: same currency and
+   * strictly lower than `reference.amount`. False whenever a reference price
+   * was supplied but the comparison can't clear that bar (higher/equal price,
+   * currency mismatch, or the offer is the user's own current listing). When
+   * no reference price is supplied at all (caller has no "current page" to
+   * compare against, e.g. Direct Search), defaults to true - unchanged legacy
+   * behavior. Only offers with verifiedDeal === true are returned by
+   * calculateDeals - callers must never badge an unverified offer as a "deal".
+   */
+  verifiedDeal: boolean;
+}
+
+/**
+ * Hard sanity guard: a listing can only be called a "deal" relative to the
+ * reference (current on-screen) price when the comparison is unambiguous -
+ * same currency, strictly cheaper, and not the same listing the user is
+ * already on. This is intentionally strict: when in doubt, this returns false
+ * and the caller degrades to a neutral price display instead of asserting a
+ * false "better deal" claim.
+ */
+function isVerifiedDeal(
+  offer: MarketplaceOffer,
+  finalPayable: number,
+  reference: ReferencePrice | null | undefined
+): boolean {
+  // The user's own current listing (matched by retailerId in applyReferenceGuard)
+  // is never "a deal" relative to itself, no matter what card discount applies.
+  if (offer.isCurrentListing) return false;
+  if (!reference) return true;
+  if (offer.currency !== reference.currency) return false;
+  return finalPayable < reference.amount;
 }
 
 function ruleAppliesToMarketplace(rule: OfferRule, retailerId: string): boolean {
@@ -47,12 +80,20 @@ function computeSavings(rule: OfferRule, price: number): number {
 /**
  * Deterministic effective-price calculator.
  * Picks best single method per offer (non-stacking by default) plus membership perks.
+ *
+ * `reference` is the price the user is already looking at (extracted live from
+ * their own screen) - when supplied, any offer that isn't verifiably cheaper
+ * (same currency, strictly lower final price, not the user's own current
+ * listing) is dropped from the returned deals rather than risk badging a
+ * worse or unverifiable price as a "deal". See isVerifiedDeal above.
  */
 export function calculateDeals(
   offers: MarketplaceOffer[],
   ownedMethods: PaymentMethodId[],
-  now = new Date()
+  opts: { now?: Date; reference?: ReferencePrice | null } = {}
 ): RankedDeal[] {
+  const now = opts.now ?? new Date();
+  const reference = opts.reference ?? null;
   const owned = new Set(ownedMethods);
   const activeRules = OFFER_RULES.filter((r) => isRuleActive(r, now));
 
@@ -67,6 +108,7 @@ export function calculateDeals(
         totalSavings: 0,
         applied: [],
         methodUsed: null,
+        verifiedDeal: false,
       });
       continue;
     }
@@ -105,17 +147,19 @@ export function calculateDeals(
       totalSavings += savings;
     }
 
+    const finalPayable = Math.max(0, listPrice - totalSavings);
     ranked.push({
       offer,
       listPrice,
-      finalPayable: Math.max(0, listPrice - totalSavings),
+      finalPayable,
       totalSavings,
       applied,
       methodUsed: best?.method ?? applied[0]?.method ?? null,
+      verifiedDeal: isVerifiedDeal(offer, finalPayable, reference),
     });
   }
 
   return ranked
-    .filter((d) => Number.isFinite(d.finalPayable))
+    .filter((d) => Number.isFinite(d.finalPayable) && d.verifiedDeal)
     .sort((a, b) => a.finalPayable - b.finalPayable);
 }

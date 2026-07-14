@@ -35,6 +35,18 @@ const BodySchema = z.object({
   methods: z.array(MethodSchema).optional(),
   gtin: z.string().nullable().optional(),
   country: z.enum(["IN", "US"]).optional(),
+  location: z.object({ lat: z.number(), lon: z.number() }).optional(),
+  /** Live price already on the user's screen for this exact product - used to
+   *  guard against ever badging a same-platform or higher-priced offer as a
+   *  "deal". See deals/calculator.ts isVerifiedDeal. */
+  reference: z
+    .object({
+      amount: z.number().positive(),
+      currency: z.string().min(1),
+      retailerId: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export async function dealsRoute(app: FastifyInstance) {
@@ -70,11 +82,14 @@ export async function dealsRoute(app: FastifyInstance) {
 
       const start = Date.now();
       try {
+        const reference = parsed.data.reference ?? null;
         const compare = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
+          location: parsed.data.location ?? null,
+          reference,
         });
-        const ranked = country === "US" ? [] : calculateDeals(compare.offers, methods);
+        const ranked = country === "US" ? [] : calculateDeals(compare.offers, methods, { reference });
         req.log.info(
           {
             requestId: req.id,
