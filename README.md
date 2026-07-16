@@ -9,13 +9,22 @@ Every fact in the report is grounded in a web search + scraping pipeline—it is
 ```text
 Camera photo
   -> Claude vision                 -> product identity
-  -> Search API (parallel, source-scoped):
+  -> Firecrawl Search (parallel, source-scoped):
        reddit / amazon / flipkart / youtube / blogs+forums / news / official site / price history
-  -> URL Scraper (batch job, submit + poll -> markdown per source)
+  -> Firecrawl batch scrape (submit + poll -> markdown per source)
   -> Claude synthesis              -> structured ConsensusReport
 ```
 
-Every scan runs 8 parallel `Search` calls (one per source type), then a `URL Scraper` batch job against the best ~8 citations found. The URL Scraper is asynchronous—the server submits the batch and polls for completion (2s interval) until the scrape finishes or a timeout budget is hit, then falls back to search snippets for any source that didn't finish in time.
+Every scan runs 8 parallel Firecrawl `Search` calls (one per source type), then a Firecrawl batch scrape job against the best ~8 citations found. The batch scrape is asynchronous—the server submits the batch and polls for completion (2s interval) until the scrape finishes or a timeout budget is hit, then falls back to search snippets for any source that didn't finish in time.
+
+## Firecrawl
+
+Firecrawl is the web-data engine behind every report — the search + scraping pipeline is Firecrawl end to end, not a thin LLM wrapper.
+
+- **Search** — each scan fans out 8 parallel Firecrawl `Search` calls, one per source type (reddit / amazon / flipkart / youtube / blogs+forums / news / official site / price history), returning ranked results plus snippets.
+- **Scrape** — the best ~8 citations go to a Firecrawl batch scrape job (submit + poll, 2s interval) that returns clean markdown per source. Async by design: partial results fall back to search snippets when a source misses the timeout budget.
+- **Monitors** — optional price/stock tracking uses Firecrawl `/monitor` when `FIRECRAWL_API_KEY` is set. Change events arrive via webhook at `POST /webhooks/firecrawl`, secured with `FIRECRAWL_WEBHOOK_SECRET` (header `x-verdict-webhook-secret`) and `PUBLIC_BASE_URL`.
+- **Soft-disabled by default** — no `FIRECRAWL_API_KEY` means monitors stay off and the server degrades to search-only; zero behavior change.
 
 ## Structure
 
