@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "./Tappable";
-import { colors, fonts, radius, space } from "../theme";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
 import { hasLocationPermission, requestLocationPermission } from "../location";
 import { track } from "../analytics/posthog";
 
@@ -39,10 +39,10 @@ export function LocationBanner({ onGranted }: { onGranted?: () => void }) {
   }
 
   return (
-    <Tappable onPress={enable} style={styles.banner}>
-      <Ionicons name="location-outline" size={15} color={colors.accent} />
-      <Text style={styles.text}>Enable location for accurate Blinkit/BigBasket prices</Text>
-      <Ionicons name="chevron-forward" size={14} color={colors.textFaint} />
+    <Tappable onPress={enable} style={styles.banner} accessibilityLabel="Enable location">
+      <Ionicons name="location-outline" size={iconSize.sm} color={colors.accent} />
+      <Text style={styles.text}>Turn on location for accurate Blinkit / BigBasket prices</Text>
+      <Ionicons name="chevron-forward" size={iconSize.sm} color={colors.textFaint} />
     </Tappable>
   );
 }
@@ -55,8 +55,8 @@ const styles = StyleSheet.create({
     padding: space(3),
     borderRadius: radius.md,
     backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-  text: { flex: 1, fontFamily: fonts.sansSemiBold, fontSize: 12.5, color: colors.text },
+  text: { flex: 1, ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.text },
 });

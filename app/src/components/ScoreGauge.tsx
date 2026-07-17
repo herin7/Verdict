@@ -2,15 +2,15 @@ import { useEffect } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import Animated, { useAnimatedProps, useSharedValue, withTiming, Easing } from "react-native-reanimated";
-import { colors, fonts, motion } from "../theme";
+import { colors, fonts, motion, space } from "../theme";
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export function ScoreGauge({
   score,
   color,
-  size = 92,
-  stroke = 9,
+  size = space(23),
+  stroke = space(2),
 }: {
   score: number;
   color: string;
@@ -26,7 +26,7 @@ export function ScoreGauge({
       duration: motion.slow,
       easing: Easing.out(Easing.cubic),
     });
-  }, [score]);
+  }, [score, progress]);
 
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: circumference * (1 - progress.value),
@@ -39,7 +39,7 @@ export function ScoreGauge({
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="rgba(255,255,255,0.10)"
+          stroke={colors.border}
           strokeWidth={stroke}
           fill="none"
         />
@@ -67,6 +67,6 @@ export function ScoreGauge({
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
-  score: { fontFamily: fonts.monoBold, fontSize: 25, lineHeight: 28 },
+  score: { fontFamily: fonts.monoBold, fontSize: 24, lineHeight: 28 },
   max: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 11, marginTop: -2 },
 });

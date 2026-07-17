@@ -28,7 +28,7 @@ export function SkiaLoader({ size = 42 }: { size?: number }) {
   return (
     <Animated.View style={[{ width: size, height: size }, style]}>
       <Canvas style={StyleSheet.absoluteFill}>
-        <Circle cx={size / 2} cy={size / 2} r={r} color="rgba(255,215,109,0.12)" style="stroke" strokeWidth={3} />
+        <Circle cx={size / 2} cy={size / 2} r={r} color={colors.accentSoft} style="stroke" strokeWidth={3} />
         <Path path={arc} style="stroke" strokeWidth={3} strokeCap="round" color={colors.accent} />
       </Canvas>
     </Animated.View>

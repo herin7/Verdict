@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { PrimaryButton } from "./ui";
-import { colors, fonts, space } from "../theme";
+import { colors, font, fonts, space } from "../theme";
 
 type Props = { children: ReactNode; onReset?: () => void };
 type State = { error: Error | null };
@@ -44,6 +44,6 @@ const styles = StyleSheet.create({
     padding: space(8),
     gap: space(3),
   },
-  title: { fontFamily: fonts.serif, fontSize: 28, color: colors.text },
-  body: { fontFamily: fonts.sans, fontSize: 14, color: colors.textMuted, textAlign: "center", marginBottom: space(2) },
+  title: { ...font.h1, fontFamily: fonts.serif, color: colors.text },
+  body: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted, textAlign: "center", marginBottom: space(2) },
 });

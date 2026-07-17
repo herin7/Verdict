@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
+import { colors, radius, space } from "../theme";
 
 /** Idle-state viewfinder: breathing corner brackets + a slow scan-line sweep. */
 export function ScannerFrame() {
@@ -46,12 +47,12 @@ export function ScannerFrame() {
       <Animated.View
         style={[styles.corner, { bottom: -1, left: -1, transform: [{ rotate: "270deg" }], opacity: cornerOpacity }]}
       />
-      {size > 0 && (
+      {size > 0 ? (
         <Animated.View
           pointerEvents="none"
           style={[styles.scanLine, { opacity: scanOpacity, transform: [{ translateY: scanTranslate }] }]}
         />
-      )}
+      ) : null}
     </View>
   );
 }
@@ -60,22 +61,22 @@ const styles = StyleSheet.create({
   finder: { width: "72%", aspectRatio: 1, position: "relative" },
   corner: {
     position: "absolute",
-    width: 30,
-    height: 30,
+    width: space(7.5),
+    height: space(7.5),
     borderTopWidth: 2.5,
     borderLeftWidth: 2.5,
-    borderColor: "rgba(255,215,109,0.85)",
-    borderTopLeftRadius: 14,
+    borderColor: colors.accent,
+    borderTopLeftRadius: radius.md,
   },
   scanLine: {
     position: "absolute",
-    left: 4,
-    right: 4,
+    left: space(1),
+    right: space(1),
     height: 2,
     borderRadius: 1,
-    backgroundColor: "rgba(255,215,109,0.85)",
-    shadowColor: "#FFD76D",
-    shadowOpacity: 0.9,
+    backgroundColor: colors.accent,
+    shadowColor: colors.accent,
+    shadowOpacity: 0.7,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },

@@ -55,6 +55,16 @@ export function ProductThumb({
 }
 
 const styles = StyleSheet.create({
-  img: { backgroundColor: "rgba(255,255,255,0.06)" },
-  iconWrap: { alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
+  img: {
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  iconWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.accentSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
 });

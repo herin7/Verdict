@@ -3,24 +3,19 @@ import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ProductThumb, type ThumbStatus } from "./ProductThumb";
 import { FadeIn } from "./FadeIn";
-import { SkiaLoader } from "./SkiaLoader";
-import { colors, fonts, radius } from "../theme";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
 import type { ProductIdentity } from "../types";
 
 const MESSAGES = [
-  "Scanning Reddit threads...",
-  "Reading Amazon & Flipkart reviews...",
-  "Checking long-term owner complaints...",
-  "Cross-referencing price history...",
-  "Filtering out fake reviews...",
-  "Weighing pros against complaints...",
-  "Synthesizing the internet's verdict...",
+  "Searching Reddit threads…",
+  "Reading Flipkart & Amazon reviews…",
+  "Checking long-term owner complaints…",
+  "Cross-checking price history…",
+  "Filtering fake reviews…",
+  "Weighing pros against complaints…",
+  "Writing your verdict…",
 ];
 
-/**
- * Full-screen takeover shown the instant "Research" is tapped - covers the live
- * camera entirely so the user visually leaves the scanner rather than waiting on it.
- */
 export function ResearchingScreen({
   product,
   thumbStatus,
@@ -62,9 +57,9 @@ export function ResearchingScreen({
     return () => loop.stop();
   }, [trackWidth, bar]);
 
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] });
-  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
-  const barWidth = Math.max(trackWidth * 0.36, 40);
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] });
+  const barWidth = Math.max(trackWidth * 0.36, space(10));
   const barTranslate = bar.interpolate({ inputRange: [0, 1], outputRange: [-barWidth, trackWidth] });
 
   return (
@@ -78,7 +73,7 @@ export function ResearchingScreen({
               status={thumbStatus}
               imageUrl={imageUrl}
               fallbackUri={fallbackUri}
-              size={76}
+              size={space(19)}
             />
           </View>
         </View>
@@ -91,20 +86,16 @@ export function ResearchingScreen({
         <View style={styles.msgWrap}>
           <FadeIn key={msgIndex} duration={260} distance={6}>
             <View style={styles.msgRow}>
-              <Ionicons name="sparkles-outline" size={13} color={colors.accent} />
+              <Ionicons name="sparkles-outline" size={iconSize.sm} color={colors.accent} />
               <Text style={styles.msg}>{MESSAGES[msgIndex]}</Text>
             </View>
           </FadeIn>
         </View>
 
-        <View style={{ marginVertical: 10 }}>
-          <SkiaLoader size={36} />
-        </View>
-
         <View style={styles.track} onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}>
-          {trackWidth > 0 && (
+          {trackWidth > 0 ? (
             <Animated.View style={[styles.bar, { width: barWidth, transform: [{ translateX: barTranslate }] }]} />
-          )}
+          ) : null}
         </View>
       </View>
     </FadeIn>
@@ -123,59 +114,45 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 20,
   },
-  center: { alignItems: "center", paddingHorizontal: 36, gap: 4 },
-
-  thumbWrap: { alignItems: "center", justifyContent: "center", marginBottom: 22 },
+  center: { alignItems: "center", paddingHorizontal: space(9), gap: space(1) },
+  thumbWrap: { alignItems: "center", justifyContent: "center", marginBottom: space(5) },
   ring: {
     position: "absolute",
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 1.5,
-    borderColor: "rgba(255,215,109,0.7)",
+    width: space(24),
+    height: space(24),
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.accent,
   },
   thumbInner: {
     borderRadius: radius.md,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,215,109,0.25)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-
-  eyebrow: {
-    fontFamily: fonts.sansBold,
-    color: colors.accent,
-    fontSize: 11,
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
+  eyebrow: { ...font.label, color: colors.accent, letterSpacing: 1.5, marginBottom: space(2) },
   name: {
     fontFamily: fonts.serif,
-    color: colors.text,
     fontSize: 24,
+    lineHeight: 30,
+    color: colors.text,
     textAlign: "center",
-    lineHeight: 28,
-    marginBottom: 22,
+    marginBottom: space(5),
   },
-
-  msgWrap: { height: 22, justifyContent: "center", marginBottom: 26 },
-  msgRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  msg: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 13.5 },
-
+  msgWrap: { height: space(5.5), justifyContent: "center", marginBottom: space(6) },
+  msgRow: { flexDirection: "row", alignItems: "center", gap: space(2) },
+  msg: { ...font.small, color: colors.textMuted },
   track: {
     width: "62%",
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    height: space(1),
+    borderRadius: radius.pill,
+    backgroundColor: colors.border,
     overflow: "hidden",
   },
   bar: {
     position: "absolute",
-    height: 3,
-    borderRadius: 2,
+    height: space(1),
+    borderRadius: radius.pill,
     backgroundColor: colors.accent,
-    shadowColor: "#FFD76D",
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
   },
 });

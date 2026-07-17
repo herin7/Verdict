@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Animated, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { colors, radius, space } from "../theme";
 
-/** Pulsing gold-tinted skeleton bar, used while a deep-dive insight is loading. */
 export function Shimmer({ style }: { style?: StyleProp<ViewStyle> }) {
   const opacity = useRef(new Animated.Value(0.35)).current;
 
@@ -22,9 +22,9 @@ export function Shimmer({ style }: { style?: StyleProp<ViewStyle> }) {
 export function SkeletonRows({ rows = 3 }: { rows?: number }) {
   const widths: `${number}%`[] = ["72%", "94%", "58%", "83%"];
   return (
-    <View style={{ gap: 9 }}>
+    <View style={{ gap: space(2) }}>
       {Array.from({ length: rows }).map((_, i) => (
-        <Shimmer key={i} style={{ height: 12, width: widths[i % widths.length] }} />
+        <Shimmer key={i} style={{ height: space(3), width: widths[i % widths.length] }} />
       ))}
     </View>
   );
@@ -32,7 +32,7 @@ export function SkeletonRows({ rows = 3 }: { rows?: number }) {
 
 const styles = StyleSheet.create({
   base: {
-    backgroundColor: "rgba(255,215,109,0.16)",
-    borderRadius: 6,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.sm,
   },
 });

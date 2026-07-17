@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LayoutAnimation, Platform, StyleSheet, Text, UIManager, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassCard } from "./GlassCard";
 import { Tappable } from "./Tappable";
 import { SkeletonRows } from "./Shimmer";
-import { colors, fonts } from "../theme";
+import { Surface } from "./ui";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -55,10 +55,10 @@ export function InsightCard<T>({
   }
 
   return (
-    <GlassCard style={styles.card} padded={false}>
-      <Tappable onPress={toggle} style={styles.header}>
+    <Surface style={styles.card} padded={false}>
+      <Tappable onPress={toggle} style={styles.header} accessibilityLabel={title}>
         <View style={styles.iconWrap}>
-          <Ionicons name={icon} size={16} color={colors.accent} />
+          <Ionicons name={icon} size={iconSize.sm} color={colors.accent} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>{title}</Text>
@@ -68,39 +68,53 @@ export function InsightCard<T>({
             </Text>
           )}
         </View>
-        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
+        <Ionicons
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={iconSize.sm}
+          color={colors.textFaint}
+        />
       </Tappable>
 
       {expanded && (
         <View style={styles.body}>
           {state.status === "loading" && <SkeletonRows />}
           {state.status === "error" && (
-            <Tappable onPress={load} style={styles.errorRow}>
-              <Ionicons name="refresh-outline" size={14} color={colors.avoid} />
+            <Tappable onPress={load} style={styles.errorRow} accessibilityLabel="Retry">
+              <Ionicons name="refresh-outline" size={iconSize.sm} color={colors.avoid} />
               <Text style={styles.errorText}>Couldn't load this - tap to retry</Text>
             </Tappable>
           )}
           {state.status === "loaded" && renderContent(state.data)}
         </View>
       )}
-    </GlassCard>
+    </Surface>
   );
 }
 
 const styles = StyleSheet.create({
   card: { overflow: "hidden" },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space(3),
+    padding: space(4),
+  },
   iconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
+    width: space(8.5),
+    height: space(8.5),
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.accentSoft,
   },
-  title: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14.5 },
-  teaser: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  body: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 2, gap: 10 },
-  errorRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  errorText: { fontFamily: fonts.sansSemiBold, color: colors.avoid, fontSize: 12.5 },
+  title: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
+  teaser: { ...font.caption, color: colors.textMuted, marginTop: space(0.5) },
+  body: {
+    paddingHorizontal: space(4),
+    paddingBottom: space(4),
+    paddingTop: space(0.5),
+    gap: space(2.5),
+  },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: space(1.5), paddingVertical: space(1) },
+  errorText: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.avoid },
 });

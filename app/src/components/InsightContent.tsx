@@ -2,10 +2,9 @@ import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Badge } from "./Badge";
 import { Timeline3D } from "./Timeline3D";
-import { colors, fonts } from "../theme";
+import { colors, font, fonts, iconSize, space } from "../theme";
 import type { BestInCategory, LongTermScore, ScamDetector, VersionHistory } from "../types";
 
-const sentimentColor = { positive: colors.buy, negative: colors.avoid, mixed: colors.mixed } as const;
 const verdictColorMap = { better: colors.buy, worse: colors.avoid, same: colors.textMuted } as const;
 const verdictIconMap = {
   better: "arrow-up-circle" as const,
@@ -23,7 +22,7 @@ const competitorColorMap = { better: colors.avoid, worse: colors.buy, similar: c
 
 export function LongTermContent({ data }: { data: LongTermScore }) {
   return (
-    <View style={{ gap: 12 }}>
+    <View style={styles.stack}>
       <View style={styles.statRow}>
         <Badge
           label={data.trend}
@@ -42,14 +41,14 @@ export function LongTermContent({ data }: { data: LongTermScore }) {
 export function VersionHistoryContent({ data }: { data: VersionHistory }) {
   if (!data.hasPreviousVersion) {
     return (
-      <View style={{ gap: 8 }}>
+      <View style={styles.gapSm}>
         <Text style={styles.summary}>{data.summary}</Text>
       </View>
     );
   }
 
   return (
-    <View style={{ gap: 12 }}>
+    <View style={styles.stack}>
       <View style={styles.statRow}>
         <Text style={styles.prevVersion}>vs {data.previousVersion}</Text>
         <Badge
@@ -58,10 +57,10 @@ export function VersionHistoryContent({ data }: { data: VersionHistory }) {
         />
       </View>
 
-      <View style={{ gap: 8 }}>
+      <View style={styles.gapSm}>
         {data.changes.map((c, i) => (
           <View key={i} style={styles.compareRow}>
-            <Ionicons name={verdictIconMap[c.verdict]} size={16} color={verdictColorMap[c.verdict]} />
+            <Ionicons name={verdictIconMap[c.verdict]} size={iconSize.sm} color={verdictColorMap[c.verdict]} />
             <View style={{ flex: 1 }}>
               <Text style={styles.aspectName}>{c.aspect}</Text>
               <Text style={styles.timelineNote}>{c.note}</Text>
@@ -77,7 +76,7 @@ export function VersionHistoryContent({ data }: { data: VersionHistory }) {
 
 export function ScamDetectorContent({ data }: { data: ScamDetector }) {
   return (
-    <View style={{ gap: 12 }}>
+    <View style={styles.stack}>
       <View style={styles.statRow}>
         <Badge label={`${data.riskLevel} risk`} color={riskColor[data.riskLevel]} icon="shield-outline" />
         <Badge label={`counterfeit: ${data.counterfeitRisk}`} color={riskColor[data.counterfeitRisk]} />
@@ -87,10 +86,10 @@ export function ScamDetectorContent({ data }: { data: ScamDetector }) {
       </View>
 
       {data.redFlags.length > 0 && (
-        <View style={{ gap: 6 }}>
+        <View style={styles.gapXs}>
           {data.redFlags.map((f, i) => (
             <View key={i} style={styles.flagRow}>
-              <Ionicons name="alert-circle-outline" size={14} color={colors.avoid} />
+              <Ionicons name="alert-circle-outline" size={iconSize.sm} color={colors.avoid} />
               <Text style={styles.timelineNote}>{f}</Text>
             </View>
           ))}
@@ -104,17 +103,17 @@ export function ScamDetectorContent({ data }: { data: ScamDetector }) {
 
 export function BestInCategoryContent({ data }: { data: BestInCategory }) {
   return (
-    <View style={{ gap: 12 }}>
+    <View style={styles.stack}>
       <View style={styles.statRow}>
         <Text style={styles.bigStat}>{data.categoryScore}</Text>
         <Text style={styles.bigStatUnit}>/100</Text>
         <Badge label={data.rank} color={colors.accent} icon="trophy-outline" />
       </View>
 
-      <View style={{ gap: 8 }}>
+      <View style={styles.gapSm}>
         {data.competitors.map((c, i) => (
           <View key={i} style={styles.compareRow}>
-            <Ionicons name={competitorIconMap[c.comparison]} size={16} color={competitorColorMap[c.comparison]} />
+            <Ionicons name={competitorIconMap[c.comparison]} size={iconSize.sm} color={competitorColorMap[c.comparison]} />
             <View style={{ flex: 1 }}>
               <Text style={styles.aspectName}>{c.name}</Text>
               <Text style={styles.timelineNote}>{c.note}</Text>
@@ -129,21 +128,17 @@ export function BestInCategoryContent({ data }: { data: BestInCategory }) {
 }
 
 const styles = StyleSheet.create({
-  statRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  bigStat: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 26 },
-  bigStatUnit: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 12, marginLeft: -4 },
-  fakePercent: { fontFamily: fonts.monoBold, color: colors.textMuted, fontSize: 12.5 },
-  prevVersion: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14 },
-
-  timelineRow: { flexDirection: "row", gap: 10 },
-  timelineDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
-  timelinePeriod: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 13 },
-  timelineNote: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 12.5, marginTop: 1, lineHeight: 17 },
-
-  compareRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
-  aspectName: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 13 },
-
-  flagRow: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
-
-  summary: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  stack: { gap: space(3) },
+  gapSm: { gap: space(2) },
+  gapXs: { gap: space(1.5) },
+  statRow: { flexDirection: "row", alignItems: "center", gap: space(2), flexWrap: "wrap" },
+  bigStat: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 26, lineHeight: 30 },
+  bigStatUnit: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textFaint, marginLeft: -space(1) },
+  fakePercent: { ...font.monoSm, fontFamily: fonts.monoBold, color: colors.textMuted },
+  prevVersion: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
+  timelineNote: { ...font.caption, color: colors.textMuted, marginTop: space(0.25), lineHeight: 17 },
+  compareRow: { flexDirection: "row", gap: space(2.5), alignItems: "flex-start" },
+  aspectName: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
+  flagRow: { flexDirection: "row", gap: space(2), alignItems: "flex-start" },
+  summary: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted, lineHeight: 19 },
 });

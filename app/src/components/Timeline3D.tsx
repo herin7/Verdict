@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Canvas, Circle, Group, Line, LinearGradient, Path, Skia, vec } from "@shopify/react-native-skia";
 import { MotiView } from "moti";
-import { colors, fonts, motion } from "../theme";
+import { colors, font, fonts, motion, space } from "../theme";
 
 type Point = { period: string; sentiment: "positive" | "negative" | "mixed"; note: string };
 
@@ -52,18 +52,18 @@ export function Timeline3D({
     >
       <Canvas style={{ width: "100%", height }}>
         <Group>
-          <Path path={path} style="stroke" strokeWidth={10} color="rgba(255,215,109,0.08)" strokeCap="round" />
-          <Path path={path} style="stroke" strokeWidth={5} color="rgba(0,0,0,0.45)" strokeCap="round" />
+          <Path path={path} style="stroke" strokeWidth={10} color={colors.accentSoft} strokeCap="round" />
+          <Path path={path} style="stroke" strokeWidth={5} color={colors.border} strokeCap="round" />
           <Path path={path} style="stroke" strokeWidth={2.5} strokeCap="round">
-            <LinearGradient start={vec(0, 0)} end={vec(width, 0)} colors={["#FFE49A", "#FFC94D", "#34d399"]} />
+            <LinearGradient start={vec(0, 0)} end={vec(width, 0)} colors={[colors.accent, colors.buy]} />
           </Path>
 
           {coords.map((c, i) => (
             <Group key={i}>
-              <Circle cx={c.x} cy={c.y + 3} r={7} color="rgba(0,0,0,0.45)" />
+              <Circle cx={c.x} cy={c.y + 2} r={7} color={colors.border} />
               <Circle cx={c.x} cy={c.y} r={6} color={colors.bgElevated} />
               <Circle cx={c.x} cy={c.y} r={3.5} color={colors.accent} />
-              <Line p1={vec(c.x, 108)} p2={vec(c.x, c.y + 10)} color="rgba(255,255,255,0.06)" strokeWidth={1} />
+              <Line p1={vec(c.x, 108)} p2={vec(c.x, c.y + 10)} color={colors.border} strokeWidth={1} />
             </Group>
           ))}
         </Group>
@@ -85,9 +85,9 @@ export function Timeline3D({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 6 },
-  labels: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 8 },
-  label: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 10.5, flex: 1, textAlign: "center" },
-  scoreLine: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  scoreNum: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 14 },
+  wrap: { gap: space(1.5) },
+  labels: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: space(2) },
+  label: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textFaint, flex: 1, textAlign: "center" },
+  scoreLine: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted, marginTop: space(1) },
+  scoreNum: { ...font.monoSm, fontFamily: fonts.monoBold, color: colors.accent },
 });
