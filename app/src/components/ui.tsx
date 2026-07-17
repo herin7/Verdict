@@ -14,20 +14,21 @@ import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets, type Edge } from "react-native-safe-area-context";
 import { Tappable } from "./Tappable";
-import { colors, font, fonts, goldGradient, motion, radius, space } from "../theme";
+import { formatMoney } from "../format";
+import { useLayout } from "../layout";
+import {
+  colors,
+  ctaGradient,
+  elevation,
+  font,
+  fonts,
+  hitSlop,
+  iconSize,
+  motion,
+  radius,
+  space,
+} from "../theme";
 
-/**
- * Every screen's root container. Applies real safe-area insets (never a hardcoded
- * marginTop/paddingTop guess) plus the standard horizontal gutter and background,
- * so status-bar/notch overlap can't silently reappear on a new screen.
- *
- * - `edges`: which sides get inset padding. Defaults to top+bottom (the two that
- *   matter for a normal vertical screen). Pass `["top"]` etc. for screens that
- *   manage their own bottom spacing (e.g. a scroll view with extra content padding).
- * - `padded`: applies the standard horizontal gutter. Set to false when a child
- *   (FlatList/ScrollView contentContainerStyle) already owns horizontal padding,
- *   to avoid doubling it up.
- */
 export function Screen({
   children,
   style,
@@ -40,6 +41,7 @@ export function Screen({
   padded?: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const { gutter } = useLayout();
   return (
     <View
       style={[
@@ -47,8 +49,8 @@ export function Screen({
         {
           paddingTop: edges.includes("top") ? insets.top : 0,
           paddingBottom: edges.includes("bottom") ? insets.bottom : 0,
-          paddingLeft: (padded ? space(5) : 0) + (edges.includes("left") ? insets.left : 0),
-          paddingRight: (padded ? space(5) : 0) + (edges.includes("right") ? insets.right : 0),
+          paddingLeft: (padded ? gutter : 0) + (edges.includes("left") ? insets.left : 0),
+          paddingRight: (padded ? gutter : 0) + (edges.includes("right") ? insets.right : 0),
         },
         style,
       ]}
@@ -58,11 +60,6 @@ export function Screen({
   );
 }
 
-/**
- * Consistent sub-screen header: back button + title (+ optional subtitle/right
- * accessory). Use inside a `Screen` for every pushed screen so back navigation,
- * spacing, and typography stay uniform instead of each screen hand-rolling one.
- */
 export function ScreenHeader({
   title,
   subtitle,
@@ -98,8 +95,22 @@ export function ScreenHeader({
   );
 }
 
+/** White elevated surface — replaces GlassCard on daylight. */
+export function Surface({
+  children,
+  style,
+  padded = true,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  padded?: boolean;
+}) {
+  return <View style={[styles.surface, padded && styles.surfacePadded, style]}>{children}</View>;
+}
+
+/** @deprecated prefer Surface */
 export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  return <Surface style={style}>{children}</Surface>;
 }
 
 export function Label({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
@@ -108,6 +119,22 @@ export function Label({ children, style }: { children: React.ReactNode; style?: 
 
 export function Body({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
   return <Text style={[styles.body, style]}>{children}</Text>;
+}
+
+export function Title({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
+  return <Text style={[styles.title, style]}>{children}</Text>;
+}
+
+export function Money({
+  amount,
+  currency = "INR",
+  style,
+}: {
+  amount: number;
+  currency?: string;
+  style?: StyleProp<TextStyle>;
+}) {
+  return <Text style={[styles.money, style]}>{formatMoney(amount, currency)}</Text>;
 }
 
 export function SectionHeader({
@@ -121,7 +148,7 @@ export function SectionHeader({
 }) {
   return (
     <View style={[styles.sectionHeader, style]}>
-      {icon ? <Ionicons name={icon} size={14} color={colors.textFaint} /> : null}
+      {icon ? <Ionicons name={icon} size={iconSize.sm} color={colors.textFaint} /> : null}
       <Text style={styles.sectionTitle}>{title}</Text>
     </View>
   );
@@ -134,7 +161,7 @@ export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
 export function IconButton({
   icon,
   onPress,
-  color = colors.accent,
+  color = colors.text,
   accessibilityLabel,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
@@ -147,26 +174,38 @@ export function IconButton({
       onPress={onPress}
       style={styles.iconBtn}
       accessibilityLabel={accessibilityLabel}
-      hitSlop={8}
+      hitSlop={hitSlop}
     >
-      <Ionicons name={icon} size={18} color={color} />
+      <Ionicons name={icon} size={iconSize.md} color={color} />
     </Tappable>
   );
 }
 
 export function EmptyState({
   icon = "file-tray-outline",
+  title,
   message,
+  actionLabel,
+  onAction,
   style,
 }: {
   icon?: keyof typeof Ionicons.glyphMap;
+  title?: string;
   message: string;
+  actionLabel?: string;
+  onAction?: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
   return (
     <View style={[styles.empty, style]}>
-      <Ionicons name={icon} size={36} color={colors.textFaint} />
+      <View style={styles.emptyIcon}>
+        <Ionicons name={icon} size={iconSize.xl} color={colors.textFaint} />
+      </View>
+      {title ? <Text style={styles.emptyTitle}>{title}</Text> : null}
       <Text style={styles.emptyText}>{message}</Text>
+      {actionLabel && onAction ? (
+        <PrimaryButton label={actionLabel} onPress={onAction} />
+      ) : null}
     </View>
   );
 }
@@ -191,10 +230,10 @@ export function ErrorBanner({
 }) {
   return (
     <View style={[styles.errorBanner, style]}>
-      <Ionicons name="alert-circle-outline" size={16} color={colors.avoid} />
+      <Ionicons name="alert-circle-outline" size={iconSize.sm} color={colors.avoid} />
       <Text style={styles.errorText}>{message}</Text>
       {onRetry ? (
-        <Tappable onPress={onRetry}>
+        <Tappable onPress={onRetry} accessibilityLabel="Retry">
           <Text style={styles.retryText}>Retry</Text>
         </Tappable>
       ) : null}
@@ -222,8 +261,13 @@ export function PrimaryButton({
   disabled?: boolean;
 }) {
   return (
-    <Tappable onPress={onPress} disabled={disabled} style={styles.btnWrap}>
-      <LinearGradient colors={goldGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btn}>
+    <Tappable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.btnWrap, disabled && styles.disabled, elevation.soft]}
+      accessibilityLabel={label}
+    >
+      <LinearGradient colors={ctaGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btn}>
         <Text style={styles.btnText}>{label}</Text>
       </LinearGradient>
     </Tappable>
@@ -240,8 +284,34 @@ export function SecondaryButton({
   disabled?: boolean;
 }) {
   return (
-    <Tappable onPress={onPress} disabled={disabled} style={[styles.secondaryBtn, disabled && { opacity: 0.5 }]}>
+    <Tappable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.secondaryBtn, disabled && styles.disabled]}
+      accessibilityLabel={label}
+    >
       <Text style={styles.secondaryText}>{label}</Text>
+    </Tappable>
+  );
+}
+
+export function GhostButton({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Tappable
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.ghostBtn, disabled && styles.disabled]}
+      accessibilityLabel={label}
+    >
+      <Text style={styles.ghostText}>{label}</Text>
     </Tappable>
   );
 }
@@ -263,10 +333,11 @@ export function PillButton({
     <Tappable
       onPress={onPress}
       disabled={disabled}
-      style={[styles.pill, active && styles.pillActive, disabled && { opacity: 0.45 }]}
+      style={[styles.pill, active && styles.pillActive, disabled && styles.disabled]}
+      accessibilityLabel={label}
     >
       {icon ? (
-        <Ionicons name={icon} size={14} color={active ? colors.onAccent : colors.textMuted} />
+        <Ionicons name={icon} size={iconSize.sm} color={active ? colors.onAccent : colors.textMuted} />
       ) : null}
       <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
     </Tappable>
@@ -277,7 +348,7 @@ export function SheetHeader({
   eyebrow,
   title,
   onClose,
-  closeLabel = "Back",
+  closeLabel = "Close",
 }: {
   eyebrow?: string;
   title: string;
@@ -331,9 +402,9 @@ export function Stagger({
 }) {
   return (
     <MotiView
-      from={{ opacity: 0, translateY: 12 }}
+      from={{ opacity: 0, translateY: 10 }}
       animate={{ opacity: 1, translateY: 0 }}
-      transition={{ type: "timing", duration: motion.normal, delay: index * 60 }}
+      transition={{ type: "timing", duration: motion.normal, delay: index * 50 }}
     >
       {children}
     </MotiView>
@@ -343,90 +414,97 @@ export function Stagger({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   screenHeader: { flexDirection: "row", alignItems: "center", gap: space(3), marginBottom: space(4) },
-  screenHeaderSpacer: { width: 36, height: 36 },
+  screenHeaderSpacer: { width: space(9), height: space(9) },
   screenHeaderTextWrap: { flex: 1, minWidth: 0 },
-  screenHeaderTitle: { fontFamily: fonts.serif, fontSize: 22, color: colors.text },
-  screenHeaderSubtitle: { fontFamily: fonts.sansSemiBold, fontSize: 12.5, color: colors.textMuted, marginTop: 2 },
-  card: {
+  screenHeaderTitle: { ...font.h2, fontFamily: fonts.serif, fontSize: 22, color: colors.text },
+  screenHeaderSubtitle: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted, marginTop: space(0.5) },
+  surface: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: radius.lg,
-    padding: space(4),
-    gap: space(1.5),
+    ...elevation.card,
   },
-  label: { ...font.label, color: colors.textMuted },
+  surfacePadded: { padding: space(4) },
+  label: { ...font.label, color: colors.textMuted, textTransform: "uppercase" },
   body: { ...font.body, color: colors.text },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: space(1.5), marginBottom: space(1) },
-  sectionTitle: {
-    fontFamily: fonts.sansBold,
-    fontSize: 11.5,
-    letterSpacing: 0.8,
-    color: colors.textFaint,
-    textTransform: "uppercase",
-  },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: space(2) },
+  title: { ...font.h2, color: colors.text },
+  money: { ...font.mono, color: colors.text },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: space(1.5), marginBottom: space(2) },
+  sectionTitle: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: space(2) },
   iconBtn: {
-    width: 36,
-    height: 36,
+    width: space(9),
+    height: space(9),
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-  empty: { alignItems: "center", justifyContent: "center", paddingVertical: space(10), gap: space(3) },
-  emptyText: { fontFamily: fonts.sans, fontSize: 14, color: colors.textFaint, textAlign: "center", maxWidth: 260 },
+  empty: { alignItems: "center", justifyContent: "center", paddingVertical: space(10), gap: space(3), paddingHorizontal: space(4) },
+  emptyIcon: {
+    width: space(16),
+    height: space(16),
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: { ...font.h3, color: colors.text, textAlign: "center" },
+  emptyText: { ...font.body, color: colors.textMuted, textAlign: "center", maxWidth: 280 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: space(3) },
-  loadingLabel: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted },
+  loadingLabel: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted },
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: space(2),
     padding: space(3),
     borderRadius: radius.md,
-    backgroundColor: "rgba(251,113,133,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(251,113,133,0.28)",
+    backgroundColor: colors.avoidSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.avoid,
   },
-  errorText: { flex: 1, fontFamily: fonts.sans, fontSize: 13, color: colors.avoid },
-  retryText: { fontFamily: fonts.sansBold, fontSize: 12, color: colors.accent },
+  errorText: { flex: 1, ...font.small, fontFamily: fonts.sans, color: colors.avoid },
+  retryText: { ...font.small, fontFamily: fonts.sansBold, color: colors.accent },
   field: {
-    backgroundColor: colors.bgElevated,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
-    paddingHorizontal: space(3),
-    paddingVertical: space(2.5),
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(3),
     color: colors.text,
-    fontFamily: fonts.sans,
-    fontSize: 15,
+    ...font.body,
   },
   btnWrap: { borderRadius: radius.md, overflow: "hidden" },
-  btn: { paddingVertical: space(3.75), alignItems: "center", borderRadius: radius.md },
-  btnText: { fontFamily: fonts.sansBold, fontSize: 15, color: colors.onAccent },
+  btn: { paddingVertical: space(3.5), alignItems: "center", borderRadius: radius.md },
+  btnText: { ...font.bodyMedium, fontFamily: fonts.sansBold, color: colors.onAccent },
   secondaryBtn: {
     alignItems: "center",
     paddingVertical: space(3),
     paddingHorizontal: space(4),
     borderRadius: radius.md,
     backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-  secondaryText: { fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.accent },
+  secondaryText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.accent },
+  ghostBtn: { alignItems: "center", paddingVertical: space(2.5), paddingHorizontal: space(3) },
+  ghostText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.textMuted },
+  disabled: { opacity: 0.45 },
   pill: {
     flexDirection: "row",
     alignItems: "center",
     gap: space(1),
-    paddingHorizontal: space(2.5),
+    paddingHorizontal: space(3),
     paddingVertical: space(2),
     borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: colors.surfaceMuted,
   },
   pillActive: { backgroundColor: colors.accent },
-  pillText: { fontFamily: fonts.sansMedium, fontSize: 12, color: colors.textMuted },
+  pillText: { ...font.caption, fontFamily: fonts.sansMedium, color: colors.textMuted },
   pillTextActive: { color: colors.onAccent },
   sheetHeader: {
     flexDirection: "row",
@@ -435,14 +513,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space(4),
     paddingBottom: space(2),
   },
-  eyebrow: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.accent,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-  },
-  sheetTitle: { fontFamily: fonts.serif, fontSize: 20, color: colors.text },
+  eyebrow: { ...font.monoSm, color: colors.accent, textTransform: "uppercase" },
+  sheetTitle: { fontFamily: fonts.serif, fontSize: 22, lineHeight: 28, color: colors.text },
   tabs: {
     flexDirection: "row",
     flexWrap: "wrap",

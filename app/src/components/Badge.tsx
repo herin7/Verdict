@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts, radius } from "../theme";
+import { font, iconSize, radius, space } from "../theme";
 
 export function Badge({
   label,
@@ -12,8 +12,8 @@ export function Badge({
   icon?: keyof typeof Ionicons.glyphMap;
 }) {
   return (
-    <View style={[styles.badge, { backgroundColor: `${color}22`, borderColor: `${color}55` }]}>
-      {icon && <Ionicons name={icon} size={12} color={color} style={{ marginRight: 5 }} />}
+    <View style={[styles.badge, { backgroundColor: `${color}18`, borderColor: `${color}44` }]}>
+      {icon ? <Ionicons name={icon} size={iconSize.sm - 4} color={color} style={{ marginRight: space(1) }} /> : null}
       <Text style={[styles.label, { color }]}>{label}</Text>
     </View>
   );
@@ -24,10 +24,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingVertical: space(1),
+    paddingHorizontal: space(2.5),
     borderRadius: radius.pill,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  label: { fontFamily: fonts.sansBold, fontSize: 11.5, textTransform: "uppercase", letterSpacing: 0.6 },
+  label: { ...font.label, letterSpacing: 0.6 },
 });
