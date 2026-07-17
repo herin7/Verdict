@@ -1,59 +1,96 @@
+/** India Daylight — single source for color, type, space, motion. No hex in screens. */
+
 export const colors = {
-  bg: "#000000",
-  bgElevated: "#0e0e0e",
-  surface: "rgba(255,255,255,0.05)",
-  surfaceBorder: "rgba(255,215,109,0.16)",
-  text: "#ffffff",
-  textMuted: "#b8b2a3",
-  textFaint: "#6e6656",
+  bg: "#F7F8FA",
+  bgElevated: "#FFFFFF",
+  surface: "#FFFFFF",
+  surfaceElevated: "#FFFFFF",
+  surfaceMuted: "#F1F5F9",
+  border: "#E2E8F0",
+  /** @deprecated use border */
+  surfaceBorder: "#E2E8F0",
 
-  accent: "#FFD76D",
-  accentSoft: "rgba(255,215,109,0.14)",
-  onAccent: "#171106",
+  text: "#0F172A",
+  textMuted: "#64748B",
+  textFaint: "#94A3B8",
 
-  buy: "#34d399",
-  wait: "#FFD76D",
-  avoid: "#fb7185",
-  mixed: "#c4a7f7",
+  accent: "#EA580C",
+  accentSoft: "rgba(234,88,12,0.12)",
+  onAccent: "#FFFFFF",
+
+  buy: "#0F766E",
+  buySoft: "rgba(15,118,110,0.12)",
+  wait: "#B45309",
+  waitSoft: "rgba(180,83,9,0.12)",
+  avoid: "#E11D48",
+  avoidSoft: "rgba(225,29,72,0.10)",
+  mixed: "#7C3AED",
+  mixedSoft: "rgba(124,58,237,0.10)",
+
+  overlayScrim: "rgba(15,23,42,0.45)",
+  ticketPerforation: "#CBD5E1",
 };
 
-export const verdictGradient: Record<"buy" | "wait" | "avoid" | "mixed", [string, string]> = {
-  buy: ["#12261f", "#050807"],
-  wait: ["#2b2205", "#0d0a02"],
-  avoid: ["#2b0d13", "#0d0405"],
-  mixed: ["#20182e", "#0a0810"],
+export type VerdictKind = "buy" | "wait" | "avoid" | "mixed";
+
+export const verdictGradient: Record<VerdictKind, [string, string]> = {
+  buy: ["#ECFDF5", "#FFFFFF"],
+  wait: ["#FFFBEB", "#FFFFFF"],
+  avoid: ["#FFF1F2", "#FFFFFF"],
+  mixed: ["#F5F3FF", "#FFFFFF"],
 };
 
-export const verdictColor: Record<"buy" | "wait" | "avoid" | "mixed", string> = {
+export const verdictColor: Record<VerdictKind, string> = {
   buy: colors.buy,
   wait: colors.wait,
   avoid: colors.avoid,
   mixed: colors.mixed,
 };
 
-export const verdictLabel: Record<"buy" | "wait" | "avoid" | "mixed", string> = {
+export const verdictSoft: Record<VerdictKind, string> = {
+  buy: colors.buySoft,
+  wait: colors.waitSoft,
+  avoid: colors.avoidSoft,
+  mixed: colors.mixedSoft,
+};
+
+export const verdictLabel: Record<VerdictKind, string> = {
   buy: "Buy",
   wait: "Wait",
   avoid: "Avoid",
   mixed: "Mixed",
 };
 
-export const goldGradient: [string, string] = ["#FFE49A", "#FFC94D"];
+/** Primary CTA gradient (mango). */
+export const ctaGradient: [string, string] = ["#FB923C", "#EA580C"];
+/** @deprecated use ctaGradient */
+export const goldGradient = ctaGradient;
 
-export const radius = { sm: 10, md: 16, lg: 22, xl: 28, pill: 999 };
+export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
 
 /** 4pt spacing scale: space(4) = 16 */
 export const space = (n: number) => n * 4;
-
 export const spacing = space;
+
+export const iconSize = { sm: 16, md: 20, lg: 24, xl: 32 };
+export const hitSlop = { top: 8, bottom: 8, left: 8, right: 8 };
+/** Prefer StyleSheet.hairlineWidth at call sites; token for consistent 1px borders. */
+export const hairline = 1;
 
 export const elevation = {
   soft: {
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  card: {
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
 };
 
@@ -61,7 +98,7 @@ export const motion = {
   fast: 180,
   normal: 320,
   slow: 520,
-  spring: { damping: 16, stiffness: 180, mass: 0.8 },
+  spring: { damping: 18, stiffness: 220, mass: 0.85 },
 };
 
 export const fonts = {
@@ -77,10 +114,15 @@ export const fonts = {
 
 export const font = {
   display: { fontFamily: fonts.serif, fontSize: 40, letterSpacing: 0.2, lineHeight: 44 },
-  h1: { fontFamily: fonts.serif, fontSize: 32, letterSpacing: 0.2 },
-  h2: { fontFamily: fonts.sansSemiBold, fontSize: 17, letterSpacing: -0.2 },
+  h1: { fontFamily: fonts.serif, fontSize: 32, letterSpacing: 0.2, lineHeight: 38 },
+  h2: { fontFamily: fonts.sansSemiBold, fontSize: 18, letterSpacing: -0.2, lineHeight: 24 },
+  h3: { fontFamily: fonts.sansSemiBold, fontSize: 16, letterSpacing: -0.1, lineHeight: 22 },
   body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 22 },
-  small: { fontFamily: fonts.sansSemiBold, fontSize: 12.5 },
-  label: { fontFamily: fonts.sansBold, fontSize: 11.5, letterSpacing: 0.8 },
-  mono: { fontFamily: fonts.monoBold, fontSize: 14 },
+  bodyMedium: { fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 22 },
+  small: { fontFamily: fonts.sansSemiBold, fontSize: 13, lineHeight: 18 },
+  caption: { fontFamily: fonts.sans, fontSize: 12, lineHeight: 16 },
+  label: { fontFamily: fonts.sansBold, fontSize: 11, letterSpacing: 0.6, lineHeight: 14 },
+  mono: { fontFamily: fonts.monoBold, fontSize: 14, lineHeight: 18 },
+  monoSm: { fontFamily: fonts.mono, fontSize: 11, letterSpacing: 0.4, lineHeight: 14 },
+  tab: { fontFamily: fonts.sansSemiBold, fontSize: 11, lineHeight: 14 },
 };
