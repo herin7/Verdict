@@ -5,3 +5,21 @@ dist
 *.log
 .expo
 .DS_Store
+
+# Agent/skill tooling installed locally (ui-skills, react-doctor, ctx7, agent-native, etc.)
+.claude/
+.agents/
+.agent-native/
+.cursor/
+.pi/
+.grok/
+agent-native.json
+skills-lock.json
+earn.md
+
+# Agent-Native Plan local bridge tokens / scratch
+plan-blocks.md
+**/.plan-url
+**/.plan-state.json
+**/comments.json
+node_modules/

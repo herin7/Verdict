@@ -1,0 +1,21 @@
+# Normalize line endings on commit to LF, and check out LF on every platform.
+# Prevents the whole-tree CRLF/LF churn that shows every file as "modified"
+# when the repo is touched from both Windows and WSL.
+* text=auto eol=lf
+
+# Binary / generated assets — never touch their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.keystore binary
+*.jar binary
+*.wasm binary
+*.ttf binary
+*.otf binary
+
+# Windows batch/gradle wrappers keep CRLF so they run under cmd.exe.
+*.bat text eol=crlf
+gradlew.bat text eol=crlf
