@@ -9,27 +9,36 @@ import { z } from "zod";
  * that coercion is unambiguous. Zod still does final validation - this only
  * normalizes shape, it never invents data.
  */
-export function coerceToSchema(schema: z.ZodTypeAny, value: unknown): unknown {
-  const def = schema._def as any;
-  const typeName = def.typeName as string;
+export function coerceToSchema(schema: z.ZodType, value: unknown): unknown {
+  // Zod 4 moved the schema definition to `._zod.def` and renamed the discriminant
+  // from a PascalCase `typeName` ("ZodOptional") to a lowercase `type` ("optional").
+  // Wrapper inner schemas (`innerType`), the object `shape`, and the array `element`
+  // also changed access shape - see each case below.
+  const def = (schema as any)._zod.def;
+  const type = def.type as string;
 
-  switch (typeName) {
-    case "ZodOptional":
+  switch (type) {
+    case "optional":
       return value === undefined ? undefined : coerceToSchema(def.innerType, value);
 
-    case "ZodNullable":
+    case "nullable":
       return value === null ? null : coerceToSchema(def.innerType, value);
 
-    case "ZodDefault":
-      return value === undefined ? def.defaultValue() : coerceToSchema(def.innerType, value);
+    case "default":
+    case "prefault": {
+      // In Zod 4 `defaultValue` is the value itself (Zod 3 exposed it as a thunk);
+      // tolerate either so the coercion survives a future shape change.
+      if (value !== undefined) return coerceToSchema(def.innerType, value);
+      return typeof def.defaultValue === "function" ? def.defaultValue() : def.defaultValue;
+    }
 
-    case "ZodString": {
+    case "string": {
       if (typeof value === "string") return value;
       if (value == null) return value;
       return typeof value === "object" ? JSON.stringify(value) : String(value);
     }
 
-    case "ZodNumber": {
+    case "number": {
       if (typeof value === "number") return value;
       if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
         return Number(value);
@@ -37,17 +46,17 @@ export function coerceToSchema(schema: z.ZodTypeAny, value: unknown): unknown {
       return value;
     }
 
-    case "ZodBoolean": {
+    case "boolean": {
       if (typeof value === "boolean") return value;
       if (value === "true") return true;
       if (value === "false") return false;
       return value;
     }
 
-    case "ZodEnum":
+    case "enum":
       return value;
 
-    case "ZodArray": {
+    case "array": {
       let arr: unknown[];
       if (Array.isArray(value)) {
         arr = value;
@@ -61,12 +70,12 @@ export function coerceToSchema(schema: z.ZodTypeAny, value: unknown): unknown {
       } else {
         arr = [value];
       }
-      return arr.map((item) => coerceToSchema(def.type, item));
+      return arr.map((item) => coerceToSchema(def.element, item));
     }
 
-    case "ZodObject": {
+    case "object": {
       const obj = extractObject(value);
-      const shape = def.shape() as Record<string, z.ZodTypeAny>;
+      const shape = def.shape as Record<string, z.ZodType>;
       const out: Record<string, unknown> = {};
       for (const key of Object.keys(shape)) {
         out[key] = coerceToSchema(shape[key], obj[key]);

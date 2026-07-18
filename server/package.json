@@ -17,30 +17,31 @@
     "test:http": "tsx test/http-reliability.test.ts",
     "test:screen-text": "tsx test/screen-text.test.ts",
     "test:identify-screen": "tsx test/identify-screen.test.ts",
-    "test": "tsx src/deals/calculator.test.ts && tsx src/marketplaces/registry.test.ts && tsx src/services/compare.test.ts && tsx test/ai-gateway.test.ts && tsx test/firecrawl-missions.test.ts && tsx test/http-reliability.test.ts && tsx test/screen-text.test.ts && tsx test/identify-screen.test.ts",
+    "test": "tsx src/deals/calculator.test.ts && tsx src/marketplaces/registry.test.ts && tsx src/marketplaces/normalize.test.ts && tsx src/services/compare.test.ts && tsx src/services/compare.roundrobin.test.ts && tsx test/ai-gateway.test.ts && tsx test/firecrawl-missions.test.ts && tsx test/http-reliability.test.ts && tsx test/screen-text.test.ts && tsx test/identify-screen.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
-    "@aws-sdk/client-bedrock-runtime": "^3.1086.0",
-    "@fastify/cors": "^10.0.1",
+    "@anthropic-ai/sdk": "^0.111.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1088.0",
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.1.0",
     "@neondatabase/serverless": "^1.1.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.2.1",
+    "fastify": "^5.10.0",
     "jose": "^6.2.3",
+    "openai": "^6.48.0",
     "pino": "^10.3.1",
-    "posthog-node": "^5.42.0",
-    "zod": "^3.24.1"
+    "posthog-node": "^5.43.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
   }
 }

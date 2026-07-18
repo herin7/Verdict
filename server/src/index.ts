@@ -115,7 +115,6 @@ app.get("/health", async (_req, reply) => {
     missions: config.missionsEnabled,
     firecrawl: Boolean(config.firecrawlApiKey),
     providers: {
-      anakin: "configured" as const,
       anthropic: "configured" as const,
       firecrawl: Boolean(config.firecrawlApiKey) ? ("configured" as const) : ("disabled" as const),
       posthog: config.posthogEnabled ? ("configured" as const) : ("disabled" as const),

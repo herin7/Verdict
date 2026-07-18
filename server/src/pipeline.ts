@@ -1,8 +1,8 @@
-import type { ScrapedPage } from "./anakin.js";
-import { firecrawlEnabled } from "./firecrawl.js";
+import type { ScrapedPage } from "./providers/types.js";
 import { synthesizeReport } from "./claude.js";
 import { extractBuyLinks, type BuyLink } from "./buylinks.js";
-import { CreditTracker, scrapeWithFallback, searchMany, selectUrls, type SourceQuery } from "./webResearch.js";
+import { scrapeWithFallback, searchMany, selectUrls, type SourceQuery } from "./webResearch.js";
+import type { Country } from "./marketplaces/registry.js";
 import type { ConsensusReport, ProductIdentity } from "./schema.js";
 
 export interface ResearchResult {
@@ -10,9 +10,8 @@ export interface ResearchResult {
   buyLinks: BuyLink[];
 }
 
-const SEARCH_TIMEOUT_MS = 12000;
-const SCRAPE_TIMEOUT_MS = 22000;
-const SCRAPE_ONE_TIMEOUT_MS = 12000;
+const SEARCH_TIMEOUT_MS = 8000;
+const SCRAPE_ONE_TIMEOUT_MS = 8000;
 const MAX_URLS_TO_SCRAPE = 6;
 
 /**
@@ -30,41 +29,37 @@ function buildQueries(term: string): SourceQuery[] {
   ];
 }
 
-export async function runResearch(product: ProductIdentity): Promise<ResearchResult> {
+export async function runResearch(product: ProductIdentity, country: Country = "IN"): Promise<ResearchResult> {
   const term = product.searchTerm || product.name;
   const queries = buildQueries(term);
-  const tracker = new CreditTracker();
 
-  // A single failing search must not discard the credits already spent on the
-  // others - searchMany catches per query so partial results still produce a report.
-  const grouped = await searchMany(queries, tracker, { limit: 5, timeoutMs: SEARCH_TIMEOUT_MS });
+  // A single failing search must not discard the others - searchMany catches
+  // per query so partial results still produce a report.
+  const grouped = await searchMany(queries, { limit: 5, timeoutMs: SEARCH_TIMEOUT_MS });
 
   const picked = selectUrls(grouped, MAX_URLS_TO_SCRAPE);
 
   // Nothing to ground the report on. Fail loudly instead of paying Claude to
   // hallucinate from an empty corpus.
   if (picked.length === 0) {
-    if (tracker.error && !firecrawlEnabled()) throw tracker.error;
-    throw new Error(
-      `No sources found for "${term}". Both Anakin and the Firecrawl fallback returned no usable citations.`
-    );
+    throw new Error(`No sources found for "${term}" - Firecrawl returned no usable citations.`);
   }
 
   const byUrl = await scrapeWithFallback(
     picked.map((p) => p.url),
-    tracker,
-    { batchTimeoutMs: SCRAPE_TIMEOUT_MS, oneTimeoutMs: SCRAPE_ONE_TIMEOUT_MS }
+    { oneTimeoutMs: SCRAPE_ONE_TIMEOUT_MS }
   );
 
   // Last resort: use the search snippet so Claude always has some grounding per
   // citation, never a blank source.
   const pages: ScrapedPage[] = picked.map((p) => byUrl.get(p.url) ?? { url: p.url, markdown: p.title });
 
-  // Real citations filtered to known retail domains - price comes free from the
-  // snippet when mentioned, else a small bounded scrape (never invented by the LLM).
-  const buyLinksPromise = extractBuyLinks(grouped);
+  // Real citations filtered to known retail domains for the user's own country -
+  // price comes free from the snippet when mentioned, else a small bounded scrape
+  // (never invented by the LLM).
+  const buyLinksPromise = extractBuyLinks(grouped, country);
 
-  const report = await synthesizeReport(product, pages);
+  const report = await synthesizeReport(product, pages, country);
   const buyLinks = await buyLinksPromise;
   return { report, buyLinks };
 }

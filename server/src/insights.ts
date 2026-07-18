@@ -4,7 +4,7 @@ import {
   synthesizeScamDetector,
   synthesizeBestInCategory,
 } from "./claude.js";
-import { CreditTracker, gatherPages, type SourceQuery } from "./webResearch.js";
+import { gatherPages, type SourceQuery } from "./webResearch.js";
 import type {
   ProductIdentity,
   LongTermScore,
@@ -47,8 +47,7 @@ function queriesFor(type: InsightType, product: ProductIdentity, term: string): 
 
 async function research(type: InsightType, product: ProductIdentity) {
   const term = product.searchTerm || product.name;
-  const tracker = new CreditTracker();
-  const pages = await gatherPages(term, queriesFor(type, product, term), tracker, {
+  const pages = await gatherPages(term, queriesFor(type, product, term), {
     maxUrls: MAX_URLS,
     searchTimeoutMs: SEARCH_TIMEOUT_MS,
     scrapeTimeoutMs: SCRAPE_TIMEOUT_MS,

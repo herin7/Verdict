@@ -6,6 +6,8 @@ import { findOrCreateProduct } from "../repositories/products.js";
 import { getFreshReport, upsertReport } from "../repositories/reports.js";
 import { getFreshBuyLinks, upsertBuyLinks } from "../repositories/buyLinks.js";
 import { recordScan } from "../repositories/scans.js";
+import { backfillProductImageIfMissing } from "../productImage.js";
+import { currencyFor, normalizeCountry, type Country } from "../marketplaces/registry.js";
 import type { ConsensusReport, ProductIdentity } from "../schema.js";
 import { config } from "../config.js";
 
@@ -18,13 +20,17 @@ export type CachedResearchResult = ResearchResult & {
 
 /**
  * Cache-aside research with request coalescing.
- * Same fingerprint mid-flight shares one Anakin+Claude run.
+ * Same fingerprint+country mid-flight shares one Firecrawl+Claude run - country
+ * is part of the coalescing key because the report text itself is pinned to
+ * a currency (see claude.ts), so an IN request must never share an in-flight
+ * US run (or vice versa).
  */
 export async function researchProduct(
   product: ProductIdentity,
-  opts: { userId?: string } = {}
+  opts: { userId?: string; country?: Country | string | null } = {}
 ): Promise<CachedResearchResult> {
-  const fp = productFingerprint(product);
+  const country = normalizeCountry(opts.country);
+  const fp = `${productFingerprint(product)}:${country}`;
 
   const existing = inflight.get(fp);
   if (existing) {
@@ -35,7 +41,7 @@ export async function researchProduct(
     return { ...shared, cached: true };
   }
 
-  const promise = executeResearch(product, opts.userId);
+  const promise = executeResearch(product, country, opts.userId);
   inflight.set(fp, promise);
   try {
     return await promise;
@@ -46,13 +52,22 @@ export async function researchProduct(
 
 async function executeResearch(
   product: ProductIdentity,
+  country: Country,
   userId?: string
 ): Promise<CachedResearchResult> {
+  const currency = currencyFor(country);
   if (dbAvailable()) {
     try {
       const row = await findOrCreateProduct(product);
+      backfillProductImageIfMissing(row.id, row.imageUrl, product);
       const cachedReport = await getFreshReport(row.id);
-      if (cachedReport) {
+      // A cached report generated for the OTHER country's currency is never
+      // reused - its verdictLine/priceAnalysis/buyingAdvice text is pinned to
+      // that currency (see claude.ts), so serving it to this country would
+      // reintroduce the exact wrong-currency bug this cache check exists to
+      // prevent. Treated as a miss: falls through to a fresh, correctly-
+      // pinned run below.
+      if (cachedReport && (!cachedReport.currency || cachedReport.currency === currency)) {
         const links = (await getFreshBuyLinks(row.id)) ?? [];
         if (userId) await recordScan(userId, row.id).catch(() => {});
         console.log(`[cache] HIT report fingerprint product=${row.id}`);
@@ -65,8 +80,8 @@ async function executeResearch(
       }
 
       console.log(`[cache] MISS report product=${row.id} - running pipeline`);
-      const fresh = await runResearch(product);
-      await upsertReport(row.id, fresh.report, config.anthropicModel);
+      const fresh = await runResearch(product, country);
+      await upsertReport(row.id, fresh.report, config.anthropicModel, currency, country);
       await upsertBuyLinks(row.id, fresh.buyLinks);
       if (userId) await recordScan(userId, row.id).catch(() => {});
       return { ...fresh, productId: row.id, cached: false };
@@ -75,7 +90,7 @@ async function executeResearch(
     }
   }
 
-  const fresh = await runResearch(product);
+  const fresh = await runResearch(product, country);
   return { ...fresh, cached: false };
 }
 

@@ -1,9 +1,22 @@
-import type { SearchResult, ScrapedPage } from "../anakin.js";
+import type { FirecrawlAction } from "../firecrawl.js";
 
 export enum ProviderCapability {
   Search = "search",
   Scrape = "scrape",
   ExtractStructured = "extract_structured",
+}
+
+export interface SearchResult {
+  url: string;
+  title: string;
+  snippet: string;
+  date?: string;
+  last_updated?: string;
+}
+
+export interface ScrapedPage {
+  url: string;
+  markdown: string;
 }
 
 export interface StructuredProductData {
@@ -37,12 +50,20 @@ export interface ScrapeLocation {
 export interface ResearchProvider {
   readonly name: string;
   readonly capabilities: ReadonlySet<ProviderCapability>;
-  search(query: string, limit?: number): Promise<SearchResult[]>;
-  scrape(url: string): Promise<ScrapedPage | null>;
-  scrapeBatch?(urls: string[]): Promise<ScrapedPage[]>;
+  /**
+   * `signal` aborts the underlying HTTP call when the orchestrator's own
+   * timeout race fires - without it, a "timed out" call keeps running in the
+   * background (still retrying, still holding a connection) well past the
+   * point the orchestrator already gave up and moved on. Optional only so
+   * providers that don't wire it through yet still satisfy the interface.
+   */
+  search(query: string, limit?: number, signal?: AbortSignal): Promise<SearchResult[]>;
+  scrape(url: string, signal?: AbortSignal): Promise<ScrapedPage | null>;
+  scrapeBatch?(urls: string[], signal?: AbortSignal): Promise<ScrapedPage[]>;
   extractStructured?(
     url: string,
-    opts?: { proxy?: ScrapeProxyTier; location?: ScrapeLocation }
+    opts?: { proxy?: ScrapeProxyTier; location?: ScrapeLocation; actions?: FirecrawlAction[] },
+    signal?: AbortSignal
   ): Promise<StructuredProductData | null>;
 }
 

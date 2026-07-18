@@ -47,7 +47,7 @@ export type MissionProposal = z.infer<typeof MissionProposalSchema>;
 export const MissionEventSchema = z.object({
   at: z.number(),
   type: z.string(),
-  meta: z.record(z.unknown()).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),
 });
 export type MissionEvent = z.infer<typeof MissionEventSchema>;
 

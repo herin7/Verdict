@@ -77,14 +77,24 @@ export async function fetchWithRetry(
   throw lastErr;
 }
 
-/** Race a promise against a timeout; rejects with HttpTimeoutError (does not abort underlying work). */
-export async function withTimeoutReject<T>(p: Promise<T>, ms: number): Promise<T> {
+/**
+ * Race a promise against a timeout; rejects with HttpTimeoutError. Pass the
+ * SAME AbortController whose signal was given to `p`'s underlying fetch, and
+ * this aborts it when the timeout wins the race - without that, a "timed
+ * out" call (as far as the caller is concerned) keeps running in the
+ * background: still retrying, still holding a connection, and its eventual
+ * (much later) completion still gets recorded as if it mattered.
+ */
+export async function withTimeoutReject<T>(p: Promise<T>, ms: number, controller?: AbortController): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       p,
       new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new HttpTimeoutError(ms)), ms);
+        timer = setTimeout(() => {
+          controller?.abort();
+          reject(new HttpTimeoutError(ms));
+        }, ms);
       }),
     ]);
   } finally {

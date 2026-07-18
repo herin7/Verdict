@@ -1,12 +1,6 @@
-import type { SearchResult, ScrapedPage } from "./anakin.js";
-import {
-  CreditTracker,
-  orchestratedSearch,
-  orchestratedSearchMany,
-  orchestratedScrape,
-} from "./providers/orchestrator.js";
+import type { ScrapedPage, SearchResult } from "./providers/types.js";
+import { orchestratedSearch, orchestratedSearchMany, orchestratedScrape } from "./providers/orchestrator.js";
 
-export { CreditTracker };
 export type { SearchResult, ScrapedPage };
 
 export interface SourceQuery {
@@ -31,29 +25,21 @@ export function hostname(url: string): string {
   }
 }
 
-/** Anakin-first search via orchestrator; Firecrawl fills gaps only. */
 export async function searchWithFallback(
   q: SourceQuery,
-  tracker: CreditTracker,
   limit = 5,
   timeoutMs = 12000
 ): Promise<SearchResult[]> {
-  const out = await orchestratedSearch(
-    { type: q.type, prompt: q.prompt, minResults: 1 },
-    tracker,
-    { limit, timeoutMs }
-  );
+  const out = await orchestratedSearch({ type: q.type, prompt: q.prompt, minResults: 1 }, { limit, timeoutMs });
   return out.results;
 }
 
 export async function searchMany(
   queries: SourceQuery[],
-  tracker: CreditTracker,
   opts: { limit?: number; timeoutMs?: number } = {}
 ): Promise<GroupedResults[]> {
   const results = await orchestratedSearchMany(
     queries.map((q) => ({ type: q.type, prompt: q.prompt })),
-    tracker,
     opts
   );
   return results.map((r) => ({ type: r.type, results: r.results }));
@@ -61,10 +47,9 @@ export async function searchMany(
 
 export async function scrapeWithFallback(
   urls: string[],
-  tracker: CreditTracker,
-  opts: { batchTimeoutMs?: number; oneTimeoutMs?: number } = {}
+  opts: { oneTimeoutMs?: number } = {}
 ): Promise<Map<string, ScrapedPage>> {
-  return orchestratedScrape(urls, tracker, opts);
+  return orchestratedScrape(urls, opts);
 }
 
 /** Rank + dedupe citations across query groups: prefer source-type diversity, cap total. */
@@ -101,7 +86,6 @@ export function selectUrls(
 export async function gatherPages(
   term: string,
   queries: SourceQuery[],
-  tracker: CreditTracker,
   opts: {
     maxUrls?: number;
     searchTimeoutMs?: number;
@@ -109,24 +93,19 @@ export async function gatherPages(
     scrapeOneTimeoutMs?: number;
   } = {}
 ): Promise<ScrapedPage[]> {
-  const grouped = await searchMany(queries, tracker, {
+  const grouped = await searchMany(queries, {
     limit: 5,
     timeoutMs: opts.searchTimeoutMs ?? 10000,
   });
   const picked = selectUrls(grouped, opts.maxUrls ?? 4);
 
   if (picked.length === 0) {
-    if (tracker.error) throw tracker.error;
     throw new Error(`No sources found for "${term}".`);
   }
 
   const byUrl = await scrapeWithFallback(
     picked.map((p) => p.url),
-    tracker,
-    {
-      batchTimeoutMs: opts.scrapeTimeoutMs ?? 15000,
-      oneTimeoutMs: opts.scrapeOneTimeoutMs ?? 10000,
-    }
+    { oneTimeoutMs: opts.scrapeOneTimeoutMs ?? 10000 }
   );
 
   return picked.map((p) => byUrl.get(p.url) ?? { url: p.url, markdown: p.title });

@@ -1,6 +1,7 @@
-import { search, scrapeHtml, type SearchResult } from "./anakin.js";
 import { firecrawlEnabled, firecrawlSearch, firecrawlScrapeHtml } from "./firecrawl.js";
+import type { SearchResult } from "./providers/types.js";
 import { withTimeout } from "./webResearch.js";
+import { allMarketplaceDomains, type Country } from "./marketplaces/registry.js";
 
 export interface BuyLink {
   retailer: string;
@@ -9,28 +10,25 @@ export interface BuyLink {
   price: string | null;
 }
 
-const RETAIL_DOMAINS = [
-  "amazon.",
-  "flipkart.",
-  "walmart.",
-  "bestbuy.",
-  "target.",
-  "ebay.",
-  "croma.",
-  "reliancedigital.",
-  "myntra.",
-  "ajio.",
-  "snapdeal.",
-  "newegg.",
-  "currys.",
-  "argos.",
-  "noon.",
-  "aliexpress.",
-];
-
 // Matches the common currency-prefixed price formats that show up in retail
 // search snippets, e.g. "$199.99", "₹15,999", "Rs. 4,499", "£49.99".
 const PRICE_TEXT_RE = /(?:₹|Rs\.?\s?|INR\s?|\$|USD\s?|£|GBP\s?|€|EUR\s?)\s?[\d,]+(?:\.\d{1,2})?/i;
+
+/**
+ * True when a scraped price string's currency symbol matches the user's own
+ * country currency, OR carries no symbol at all (ambiguous - permissive by
+ * default since most bare numbers here are already same-country context).
+ * A price with an explicit, DIFFERENT symbol is never shown (mirrors the
+ * "hide mismatches" rule in marketplaces/normalize.ts filterOffersByCurrency)
+ * - relabeling the symbol would show a wrong price, not just a wrong symbol.
+ */
+function matchesCountryCurrency(raw: string | null, country: Country): boolean {
+  if (!raw) return true;
+  const isUsdSymbol = /\$|USD/i.test(raw);
+  const isInrSymbol = /₹|Rs\.?\s|INR/i.test(raw);
+  if (!isUsdSymbol && !isInrSymbol) return true;
+  return country === "US" ? isUsdSymbol : isInrSymbol;
+}
 
 const PRICE_META_RE = [
   /<meta[^>]+(?:property|name)=["'](?:product:price:amount|og:price:amount)["'][^>]+content=["']([^"']+)["']/i,
@@ -59,22 +57,14 @@ function extractPriceFromHtml(html: string): string | null {
 
 /** Best-effort per-URL price scrape (og:price/product:price meta) - never throws, bounded by caller. */
 async function scrapePriceForLink(url: string): Promise<string | null> {
+  if (!firecrawlEnabled()) return null;
   try {
-    const html = await withTimeout(scrapeHtml(url), 9000, null);
-    const price = html ? extractPriceFromHtml(html) : null;
-    if (price) return price;
+    const html = await withTimeout(firecrawlScrapeHtml(url), 9000, null);
+    return html ? extractPriceFromHtml(html) : null;
   } catch {
-    // best effort - fall through to firecrawl
+    // best effort - leave price null
+    return null;
   }
-  if (firecrawlEnabled()) {
-    try {
-      const html = await withTimeout(firecrawlScrapeHtml(url), 9000, null);
-      if (html) return extractPriceFromHtml(html);
-    } catch {
-      // best effort - leave price null
-    }
-  }
-  return null;
 }
 
 function hostnameOf(url: string): string | null {
@@ -85,10 +75,13 @@ function hostnameOf(url: string): string | null {
   }
 }
 
-function isRetailUrl(url: string): boolean {
+/** Country-scoped so a US search result (walmart.com/bestbuy.com/...) never
+ *  surfaces as a "buy link" for an IN user (and vice versa) - the prior flat,
+ *  country-blind domain list was itself a source of wrong-currency buy links. */
+function isRetailUrl(url: string, country: Country): boolean {
   const host = hostnameOf(url);
   if (!host) return false;
-  return RETAIL_DOMAINS.some((d) => host.includes(d));
+  return allMarketplaceDomains(country).some((d) => host === d || host.endsWith(`.${d}`));
 }
 
 function retailerName(url: string): string {
@@ -100,20 +93,23 @@ function retailerName(url: string): string {
 }
 
 /**
- * Filters real search citations down to known retail/marketplace domains (never
- * invented), then fills in a per-platform price - free from the search snippet
- * when mentioned there, otherwise a bounded live scrape (max 3, so a price
- * comparison never costs more than a few extra credits).
+ * Filters real search citations down to known retail/marketplace domains for
+ * the user's own country (never invented), then fills in a per-platform price
+ * - free from the search snippet when mentioned there, otherwise a bounded
+ * live scrape (max 3, so a price comparison never costs more than a few
+ * extra credits). Any resolved price whose currency symbol doesn't match the
+ * user's country is dropped (never relabeled - see matchesCountryCurrency).
  */
 export async function extractBuyLinks(
   grouped: { results: SearchResult[] }[],
+  country: Country,
   max = 4
 ): Promise<BuyLink[]> {
   const seenDomain = new Set<string>();
   const links: BuyLink[] = [];
   for (const g of grouped) {
     for (const r of g.results) {
-      if (!isRetailUrl(r.url)) continue;
+      if (!isRetailUrl(r.url, country)) continue;
       const host = hostnameOf(r.url);
       if (!host || seenDomain.has(host)) continue;
       seenDomain.add(host);
@@ -136,25 +132,23 @@ export async function extractBuyLinks(
     });
   }
 
+  for (const link of links) {
+    if (!matchesCountryCurrency(link.price, country)) link.price = null;
+  }
+
   return links;
 }
 
-/**
- * On-demand buy-link + price lookup for a single term (e.g. an alternative product name).
- * Anakin first, Firecrawl fallback - same precedence as the main research pipeline.
- */
-export async function findBuyLinks(term: string, max = 4): Promise<BuyLink[]> {
-  const prompt = `${term} buy price site:amazon.com OR site:flipkart.com OR site:walmart.com OR site:bestbuy.com OR site:ebay.com`;
+/** On-demand buy-link + price lookup for a single term (e.g. an alternative product name). */
+export async function findBuyLinks(term: string, country: Country, max = 4): Promise<BuyLink[]> {
+  const sites = allMarketplaceDomains(country)
+    .slice(0, 6)
+    .map((d) => `site:${d}`)
+    .join(" OR ");
+  const prompt = `${term} buy price ${sites}`;
 
   let results: SearchResult[] = [];
-  try {
-    results = await search(prompt, 8);
-  } catch (err) {
-    // Anakin first, Firecrawl fallback for any failure - including out of credits.
-    console.warn(`[buylinks] anakin search failed: ${(err as Error).message}`);
-  }
-
-  if (results.length === 0 && firecrawlEnabled()) {
+  if (firecrawlEnabled()) {
     try {
       results = await firecrawlSearch(prompt, 8);
     } catch (err) {
@@ -162,5 +156,5 @@ export async function findBuyLinks(term: string, max = 4): Promise<BuyLink[]> {
     }
   }
 
-  return extractBuyLinks([{ results }], max);
+  return extractBuyLinks([{ results }], country, max);
 }
