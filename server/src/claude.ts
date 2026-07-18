@@ -15,7 +15,42 @@ import {
   type ScamDetector,
   type BestInCategory,
 } from "./schema.js";
-import type { ScrapedPage } from "./anakin.js";
+import type { ScrapedPage } from "./providers/types.js";
+import { currencyFor, type Country } from "./marketplaces/registry.js";
+
+const CURRENCY_SYMBOL: Record<Country, string> = { IN: "₹", US: "$" };
+
+/**
+ * Last-line-of-defense sanitizer: the system prompt instructs the model to
+ * only mention the user's own currency, but LLMs free-texting from scraped
+ * sources (often US-centric) can still slip in the other symbol. Strip any
+ * WRONG-currency priced mention from every free-text field rather than
+ * relabeling it (a relabeled symbol on a foreign amount would state a wrong
+ * price, e.g. a $999 phone read out as "₹999") - matches the "hide
+ * mismatches, never relabel" rule used for offers/buy-links elsewhere.
+ * Builds a fresh RegExp per call - reusing one `/g` regex's `.test()` across
+ * multiple unrelated strings would corrupt matches via its shared lastIndex.
+ */
+function sanitizeReportCurrency(report: ConsensusReport, country: Country): ConsensusReport {
+  const wrongSymbol = country === "US" ? "₹" : "$";
+  const clean = (s: string) => {
+    const wrongRe = new RegExp(`${wrongSymbol === "$" ? "\\$" : wrongSymbol}\\s?[\\d,]+(?:\\.\\d{1,2})?`, "g");
+    return s.replace(wrongRe, "the listed price");
+  };
+  return {
+    ...report,
+    verdictLine: clean(report.verdictLine),
+    consensus: clean(report.consensus),
+    pros: report.pros.map(clean),
+    complaints: report.complaints.map(clean),
+    buyingAdvice: clean(report.buyingAdvice),
+    priceAnalysis: {
+      ...report.priceAnalysis,
+      summary: clean(report.priceAnalysis.summary),
+      reason: clean(report.priceAnalysis.reason),
+    },
+  };
+}
 
 const STRONG_SIGNAL_CONFIDENCE_FLOOR = 0.7;
 
@@ -238,12 +273,16 @@ const REPORT_TOOL: ToolSpec = {
 
 export async function synthesizeReport(
   product: ProductIdentity,
-  pages: ScrapedPage[]
+  pages: ScrapedPage[],
+  country: Country = "IN"
 ): Promise<ConsensusReport> {
   const corpus = pages
     .map((p, i) => `--- SOURCE ${i + 1}: ${p.url} ---\n${p.markdown.slice(0, 6000)}`)
     .join("\n\n")
     .slice(0, 90000);
+
+  const currencyCode = currencyFor(country);
+  const currencySymbol = CURRENCY_SYMBOL[country];
 
   const result = await runWorkload<ConsensusReport>({
     workload: "report",
@@ -258,9 +297,10 @@ export async function synthesizeReport(
     maxTokens: 4096,
     maxAttempts: 3,
     system:
-      "You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.",
+      `You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.` +
+      ` This user's currency is ${currencyCode} (${currencySymbol}). If you mention any price or amount anywhere in your response (priceAnalysis, buyingAdvice, verdictLine, consensus, pros, complaints), you MUST express it in ${currencyCode} only - never ${country === "US" ? "₹/INR/Rs" : "$/USD"}. Sources may quote prices in a different currency (e.g. a US retailer); when they do, do not restate that foreign number - describe the trend/price-worthiness qualitatively instead (e.g. "priced competitively", "above typical for this category") rather than quoting a number in the wrong currency.`,
   });
-  return result.data;
+  return sanitizeReportCurrency(result.data, country);
 }
 
 function buildCorpus(pages: ScrapedPage[], perPageChars = 5000, totalChars = 40000): string {

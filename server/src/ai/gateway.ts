@@ -3,11 +3,13 @@ import { capture } from "../analytics/posthog.js";
 import { logger } from "../logging/logger.js";
 import { anthropicProvider } from "./providers/anthropicProvider.js";
 import { bedrockProvider } from "./providers/bedrockProvider.js";
+import { bedrockMantleProvider } from "./providers/bedrockMantleProvider.js";
 import type { LLMCallMeta, LLMProvider, LLMResult, LLMToolCallRequest, Workload } from "./types.js";
 
 const PROVIDERS: Record<string, LLMProvider> = {
   anthropic: anthropicProvider,
   bedrock: bedrockProvider,
+  "bedrock-mantle": bedrockMantleProvider,
 };
 
 /**

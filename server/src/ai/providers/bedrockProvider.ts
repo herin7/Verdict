@@ -9,6 +9,7 @@ import type { DocumentType } from "@smithy/types";
 import type { z } from "zod";
 import { config } from "../../config.js";
 import { coerceToSchema } from "../../coerce.js";
+import { clampMaxTokens, estimateCost } from "./bedrockShared.js";
 import type {
   ImageMediaType,
   LLMContentPart,
@@ -42,44 +43,6 @@ import type {
  * -> modelId) - nothing is hardcoded here, so swapping models is a config
  * change, not a code change.
  */
-
-interface ModelPricing {
-  inputPer1M: number;
-  outputPer1M: number;
-}
-
-/**
- * Approximate US on-demand Bedrock pricing (per docs/pricing page, mid-2026).
- * ESTIMATED - re-verify at https://aws.amazon.com/bedrock/pricing/ before
- * relying on this for real budget decisions; Bedrock prices vary by region
- * and change over time.
- */
-const PRICE_TABLE: Record<string, ModelPricing> = {
-  "moonshotai.kimi-k2.5": { inputPer1M: 0.6, outputPer1M: 3.0 },
-  "moonshot.kimi-k2-thinking": { inputPer1M: 0.6, outputPer1M: 2.5 },
-  "zai.glm-4.7": { inputPer1M: 0.6, outputPer1M: 2.2 },
-  "zai.glm-4.7-flash": { inputPer1M: 0.07, outputPer1M: 0.4 },
-  "zai.glm-5": { inputPer1M: 0.9, outputPer1M: 3.3 },
-  "deepseek.v3.2": { inputPer1M: 0.62, outputPer1M: 1.85 },
-  "deepseek.v3.1": { inputPer1M: 0.58, outputPer1M: 1.68 },
-  "qwen.qwen3-coder-next": { inputPer1M: 0.5, outputPer1M: 1.2 },
-  "amazon.nova-micro-v1:0": { inputPer1M: 0.035, outputPer1M: 0.14 },
-  "amazon.nova-lite-v1:0": { inputPer1M: 0.06, outputPer1M: 0.24 },
-  "amazon.nova-pro-v1:0": { inputPer1M: 0.8, outputPer1M: 3.2 },
-  "amazon.nova-premier-v1:0": { inputPer1M: 2.5, outputPer1M: 12.5 },
-  "meta.llama3-1-8b-instruct-v1:0": { inputPer1M: 0.22, outputPer1M: 0.22 },
-  "meta.llama3-1-70b-instruct-v1:0": { inputPer1M: 0.99, outputPer1M: 0.99 },
-  "meta.llama3-1-405b-instruct-v1:0": { inputPer1M: 5.32, outputPer1M: 16.0 },
-  "meta.llama4-scout-17b-instruct-v1:0": { inputPer1M: 0.17, outputPer1M: 0.17 },
-};
-
-/** Rough OSS-model-average fallback for any modelId not in PRICE_TABLE - always an ESTIMATE. */
-const DEFAULT_PRICE: ModelPricing = { inputPer1M: 0.7, outputPer1M: 2.5 };
-
-function estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
-  const pricing = PRICE_TABLE[modelId] ?? DEFAULT_PRICE;
-  return (inputTokens / 1_000_000) * pricing.inputPer1M + (outputTokens / 1_000_000) * pricing.outputPer1M;
-}
 
 let client: BedrockRuntimeClient | undefined;
 function getClient(): BedrockRuntimeClient {
@@ -224,7 +187,7 @@ async function callToolWithValidation<T>(
           // Converse tool-use model, including GLM/Kimi/Qwen/DeepSeek/Llama.
           toolChoice: { any: {} },
         },
-        inferenceConfig: { maxTokens: opts.maxTokens },
+        inferenceConfig: { maxTokens: clampMaxTokens(modelId, opts.maxTokens) },
       })
     );
 
