@@ -1,15 +1,29 @@
-import { useEffect, useRef } from "react";
-import { Animated, Easing, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassCard } from "../components/GlassCard";
 import { Tappable } from "../components/Tappable";
 import { FadeIn } from "../components/FadeIn";
 import { AnimatedCounter } from "../components/AnimatedCounter";
 import { CategoryIcon } from "../components/Icons";
 import { Badge } from "../components/Badge";
-import { EmptyState, IconButton, Screen, SectionHeader } from "../components/ui";
-import { colors, fonts, goldGradient, radius, space, verdictColor, verdictLabel } from "../theme";
+import { ListRow } from "../components/ListRow";
+import { EmptyState, IconButton, Screen, SectionHeader, Stagger, Surface } from "../components/ui";
+import { fetchMissions, type MissionDto } from "../api/client";
+import { statusColor } from "./MissionsScreen";
+import { useLayout } from "../layout";
+import {
+  colors,
+  ctaGradient,
+  elevation,
+  font,
+  fonts,
+  iconSize,
+  radius,
+  space,
+  verdictColor,
+  verdictLabel,
+} from "../theme";
 import type { SavedReport } from "../types";
 
 function greeting(): string {
@@ -19,28 +33,6 @@ function greeting(): string {
   if (h < 17) return "Good afternoon";
   if (h < 21) return "Good evening";
   return "Good night";
-}
-
-/** Slow, ambient drifting glow - purely decorative, never intercepts touches. */
-function Orb({ style, delay = 0 }: { style: StyleProp<ViewStyle>; delay?: number }) {
-  const drift = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(drift, { toValue: 1, duration: 5200, delay, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(drift, { toValue: 0, duration: 5200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [drift, delay]);
-
-  const translateY = drift.interpolate({ inputRange: [0, 1], outputRange: [0, 18] });
-  const translateX = drift.interpolate({ inputRange: [0, 1], outputRange: [0, -12] });
-
-  return (
-    <Animated.View pointerEvents="none" style={[styles.orb, style, { transform: [{ translateX }, { translateY }] }]} />
-  );
 }
 
 export function DashboardScreen({
@@ -70,30 +62,31 @@ export function DashboardScreen({
   onOpenReport: (entry: SavedReport) => void;
   onLogout: () => void;
 }) {
-  const pulse = useRef(new Animated.Value(0)).current;
+  const { gutter } = useLayout();
+  const recentItems = recent.slice(0, 6);
+  const [activeWatches, setActiveWatches] = useState<MissionDto[]>([]);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1500, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-
-  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] });
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] });
-  const recentItems = recent.slice(0, 6);
+    if (!onMissions) return;
+    let alive = true;
+    fetchMissions()
+      .then((res) => {
+        if (!alive) return;
+        setActiveWatches(res.items.filter((m) => m.status === "monitoring" || m.status === "awaiting_approval"));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [onMissions]);
 
   return (
-    <Screen style={styles.screen} padded={false}>
-      <Orb style={styles.orbTopRight} />
-      <Orb style={styles.orbBottomLeft} delay={900} />
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <FadeIn duration={360}>
+    <Screen style={styles.screen} padded={false} edges={["top"]}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: gutter }]}
+      >
+        <FadeIn duration={320}>
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={styles.eyebrow}>{greeting().toUpperCase()}</Text>
@@ -101,155 +94,154 @@ export function DashboardScreen({
                 {username}
               </Text>
             </View>
-            <IconButton icon="log-out-outline" color={colors.textMuted} onPress={onLogout} />
+            <IconButton
+              icon="log-out-outline"
+              color={colors.textMuted}
+              onPress={onLogout}
+              accessibilityLabel="Sign out"
+            />
           </View>
         </FadeIn>
 
-        <FadeIn duration={360} delay={70}>
+        <FadeIn duration={320} delay={40}>
           <View style={styles.statsRow}>
-            <Tappable onPress={onScan} style={styles.statTap}>
-              <GlassCard style={styles.statCard}>
-                <Ionicons name="scan-outline" size={16} color={colors.accent} style={{ marginBottom: 6 }} />
+            <Tappable onPress={onScan} style={styles.statTap} accessibilityLabel="Scans">
+              <Surface style={styles.statCard}>
+                <Ionicons name="scan-outline" size={iconSize.sm} color={colors.accent} />
                 <AnimatedCounter value={scanCount} style={styles.statValue} />
                 <Text style={styles.statLabel}>Scans</Text>
-                <View style={styles.statAccent} />
-              </GlassCard>
+              </Surface>
             </Tappable>
-            <Tappable onPress={onLibrary} style={styles.statTap}>
-              <GlassCard style={styles.statCard}>
-                <Ionicons name="bookmark-outline" size={16} color={colors.accent} style={{ marginBottom: 6 }} />
+            <Tappable onPress={onLibrary} style={styles.statTap} accessibilityLabel="Saved reports">
+              <Surface style={styles.statCard}>
+                <Ionicons name="bookmark-outline" size={iconSize.sm} color={colors.accent} />
                 <AnimatedCounter value={savedCount} style={styles.statValue} />
                 <Text style={styles.statLabel}>Saved</Text>
-                <View style={styles.statAccent} />
-              </GlassCard>
+              </Surface>
             </Tappable>
           </View>
         </FadeIn>
 
-        <FadeIn duration={360} delay={140}>
-          <Tappable onPress={onScan} style={styles.actionWrap}>
-            <LinearGradient colors={goldGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.actionCard}>
+        <FadeIn duration={320} delay={80}>
+          <Tappable onPress={onScan} style={[styles.actionWrap, elevation.soft]} accessibilityLabel="Scan a product">
+            <LinearGradient colors={ctaGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.actionCard}>
               <View style={styles.actionIconWrap}>
-                <Animated.View
-                  style={[styles.actionGlow, { transform: [{ scale: glowScale }], opacity: glowOpacity }]}
-                />
-                <Ionicons name="scan-outline" size={22} color={colors.onAccent} />
+                <Ionicons name="scan-outline" size={iconSize.lg} color={colors.onAccent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.actionTitle}>Scan a product</Text>
-                <Text style={styles.actionSub}>Point your camera, get the verdict</Text>
+                <Text style={styles.actionSub}>Camera or shopping link — get a clear verdict</Text>
               </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.onAccent} />
+              <Ionicons name="chevron-forward" size={iconSize.md} color={colors.onAccent} />
             </LinearGradient>
           </Tappable>
         </FadeIn>
 
-        {onSearch && (
-          <FadeIn duration={360} delay={185}>
-            <Tappable onPress={onSearch}>
-              <GlassCard style={styles.actionCardGlass}>
-                <View style={styles.actionIconWrapGlass}>
-                  <Ionicons name="search-outline" size={20} color={colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.actionTitleGlass}>Direct Search</Text>
-                  <Text style={styles.actionSubGlass}>Type a product to compare instantly</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-              </GlassCard>
-            </Tappable>
+        {activeWatches.length > 0 ? (
+          <FadeIn duration={320} delay={100}>
+            <View style={styles.section}>
+              <SectionHeader title="Watching for a price drop" icon="notifications-outline" />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
+                {activeWatches.map((m, i) => (
+                  <Stagger key={m.id} index={i}>
+                    <Tappable onPress={onMissions} accessibilityLabel={m.product?.name ?? m.title}>
+                      <Surface style={styles.chipCard}>
+                        <Ionicons name="notifications-outline" size={iconSize.sm} color={colors.accent} />
+                        <Text style={styles.chipName} numberOfLines={2}>
+                          {m.product?.name ?? m.title}
+                        </Text>
+                        <Badge
+                          label={m.status === "monitoring" ? "Watching" : "Needs your OK"}
+                          color={statusColor(m.status)}
+                        />
+                      </Surface>
+                    </Tappable>
+                  </Stagger>
+                ))}
+              </ScrollView>
+            </View>
           </FadeIn>
-        )}
+        ) : null}
 
-        <FadeIn duration={360} delay={200}>
-          <Tappable onPress={onLibrary}>
-            <GlassCard style={styles.actionCardGlass}>
-              <View style={styles.actionIconWrapGlass}>
-                <Ionicons name="bookmark-outline" size={20} color={colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionTitleGlass}>Saved reports</Text>
-                <Text style={styles.actionSubGlass}>Revisit what you've researched</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-            </GlassCard>
-          </Tappable>
-        </FadeIn>
-
-        {onMissions && (
-          <FadeIn duration={360} delay={220}>
-            <Tappable onPress={onMissions}>
-              <GlassCard style={styles.actionCardGlass}>
-                <View style={styles.actionIconWrapGlass}>
-                  <Ionicons name="rocket-outline" size={20} color={colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.actionTitleGlass}>Shopping Missions</Text>
-                  <Text style={styles.actionSubGlass}>Agent proposes, you approve</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-              </GlassCard>
-            </Tappable>
+        <View style={styles.listGap}>
+          {onSearch ? (
+            <FadeIn duration={280} delay={120}>
+              <ListRow
+                icon="search-outline"
+                title="Search & compare"
+                subtitle="Type any product to compare prices"
+                onPress={onSearch}
+              />
+            </FadeIn>
+          ) : null}
+          <FadeIn duration={280} delay={140}>
+            <ListRow
+              icon="bookmark-outline"
+              title="Saved reports"
+              subtitle="Revisit what you researched"
+              onPress={onLibrary}
+            />
           </FadeIn>
-        )}
+          {onMissions ? (
+            <FadeIn duration={280} delay={160}>
+              <ListRow
+                icon="notifications-outline"
+                title="Price Watch"
+                subtitle="Set a price — we ping you when it drops"
+                onPress={onMissions}
+              />
+            </FadeIn>
+          ) : null}
+          {onPayments ? (
+            <FadeIn duration={280} delay={180}>
+              <ListRow
+                icon="card-outline"
+                title="Payment & Rewards"
+                subtitle="Cards, wallets, memberships you own"
+                onPress={onPayments}
+              />
+            </FadeIn>
+          ) : null}
+          {onOverlay ? (
+            <FadeIn duration={280} delay={200}>
+              <ListRow
+                icon="layers-outline"
+                title="Shopping overlay"
+                subtitle="Get the verdict inside shopping apps"
+                onPress={onOverlay}
+              />
+            </FadeIn>
+          ) : null}
+        </View>
 
-        {onPayments && (
-          <FadeIn duration={360} delay={230}>
-            <Tappable onPress={onPayments}>
-              <GlassCard style={styles.actionCardGlass}>
-                <View style={styles.actionIconWrapGlass}>
-                  <Ionicons name="card-outline" size={20} color={colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.actionTitleGlass}>Payment & Rewards</Text>
-                  <Text style={styles.actionSubGlass}>Cards, wallets, memberships you own</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-              </GlassCard>
-            </Tappable>
-          </FadeIn>
-        )}
-
-        {onOverlay && (
-          <FadeIn duration={360} delay={245}>
-            <Tappable onPress={onOverlay}>
-              <GlassCard style={styles.actionCardGlass}>
-                <View style={styles.actionIconWrapGlass}>
-                  <Ionicons name="layers-outline" size={20} color={colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.actionTitleGlass}>Shopping overlay</Text>
-                  <Text style={styles.actionSubGlass}>Float over other apps (dev build)</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-              </GlassCard>
-            </Tappable>
-          </FadeIn>
-        )}
-
-        <FadeIn duration={360} delay={260}>
-          <View style={styles.recentSection}>
-            <SectionHeader title="Recently researched" icon="time-outline" />
-
+        <FadeIn duration={320} delay={220}>
+          <View style={styles.section}>
+            <SectionHeader title="Your recent verdicts" icon="time-outline" />
             {recentItems.length === 0 ? (
-              <EmptyState icon="scan-outline" message="Your first scan will show up here." />
+              <EmptyState
+                icon="scan-outline"
+                title="No scans yet"
+                message="Your first verdict will show up here."
+                actionLabel="Scan a product"
+                onAction={onScan}
+              />
             ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.recentRow}
-              >
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
                 {recentItems.map((item) => {
                   const color = verdictColor[item.report.verdict];
                   return (
-                    <Tappable key={item.id} onPress={() => onOpenReport(item)}>
-                      <GlassCard style={styles.recentCard}>
-                        <CategoryIcon category={item.product.category} size={18} />
-                        <Text style={styles.recentName} numberOfLines={2}>
+                    <Tappable
+                      key={item.id}
+                      onPress={() => onOpenReport(item)}
+                      accessibilityLabel={`${item.product.name}, ${verdictLabel[item.report.verdict]}`}
+                    >
+                      <Surface style={styles.chipCard}>
+                        <CategoryIcon category={item.product.category} size={iconSize.md} />
+                        <Text style={styles.chipName} numberOfLines={2}>
                           {item.product.name}
                         </Text>
                         <Badge label={verdictLabel[item.report.verdict]} color={color} />
-                      </GlassCard>
+                      </Surface>
                     </Tappable>
                   );
                 })}
@@ -258,108 +250,55 @@ export function DashboardScreen({
           </View>
         </FadeIn>
 
-        <FadeIn duration={360} delay={320}>
-          <View style={styles.footer}>
-            <Ionicons name="flash" size={11} color={colors.textFaint} />
-            <Text style={styles.footerText}>Verdict - powered by Anakin</Text>
-          </View>
-        </FadeIn>
+        <View style={styles.footer}>
+          <Ionicons name="flash" size={iconSize.sm} color={colors.textFaint} />
+          <Text style={styles.footerText}>Verdict — know before you buy</Text>
+        </View>
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  scrollContent: { paddingTop: space(3), paddingHorizontal: space(5), paddingBottom: space(9) },
-
-  orb: {
-    position: "absolute",
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: "rgba(255,215,109,0.10)",
-  },
-  orbTopRight: { top: -60, right: -60 },
-  orbBottomLeft: { bottom: 40, left: -80, backgroundColor: "rgba(255,215,109,0.06)" },
-
-  header: { flexDirection: "row", alignItems: "flex-start", marginBottom: 24, gap: 12 },
-  eyebrow: { fontFamily: fonts.sansBold, color: colors.textFaint, fontSize: 11.5, letterSpacing: 0.8 },
-  greeting: { fontFamily: fonts.serif, color: colors.text, fontSize: 30, marginTop: 2 },
-  logoutBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
-  },
-
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
+  screen: { flex: 1 },
+  scrollContent: { paddingTop: space(3), paddingBottom: space(10) },
+  header: { flexDirection: "row", alignItems: "flex-start", marginBottom: space(5), gap: space(3) },
+  eyebrow: { ...font.label, color: colors.textFaint },
+  greeting: { fontFamily: fonts.serif, fontSize: 28, lineHeight: 34, color: colors.text, marginTop: space(0.5) },
+  statsRow: { flexDirection: "row", gap: space(3), marginBottom: space(4) },
   statTap: { flex: 1 },
-  statCard: { flex: 1, alignItems: "center", paddingVertical: 18, position: "relative", overflow: "hidden" },
-  statValue: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 24 },
-  statLabel: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  statAccent: {
-    position: "absolute",
-    bottom: 0,
-    left: "30%",
-    right: "30%",
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "rgba(255,215,109,0.4)",
+  statCard: { alignItems: "center", paddingVertical: space(4), gap: space(1) },
+  statValue: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 24, lineHeight: 30 },
+  statLabel: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted },
+  actionWrap: { borderRadius: radius.lg, overflow: "hidden", marginBottom: space(4) },
+  actionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space(3.5),
+    padding: space(4),
+    borderRadius: radius.lg,
   },
-
-  actionWrap: { borderRadius: radius.lg, overflow: "hidden", marginBottom: 12 },
-  actionCard: { flexDirection: "row", alignItems: "center", gap: 14, padding: 18, borderRadius: radius.lg },
   actionIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(23,17,6,0.14)",
-  },
-  actionGlow: {
-    position: "absolute",
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "rgba(23,17,6,0.3)",
-  },
-  actionTitle: { fontFamily: fonts.sansBold, color: colors.onAccent, fontSize: 16 },
-  actionSub: { fontFamily: fonts.sansSemiBold, color: "rgba(23,17,6,0.65)", fontSize: 12, marginTop: 2 },
-
-  actionCardGlass: { flexDirection: "row", alignItems: "center", gap: 14, padding: 18 },
-  actionIconWrapGlass: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.accentSoft,
-  },
-  actionTitleGlass: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 16 },
-  actionSubGlass: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 12, marginTop: 2 },
-
-  recentSection: { marginTop: 22 },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
-  sectionTitle: { fontFamily: fonts.sansBold, color: colors.textFaint, fontSize: 11.5, letterSpacing: 0.6 },
-  recentRow: { gap: 10, paddingRight: 8 },
-  recentCard: { width: 128, gap: 8, alignItems: "flex-start" },
-  recentName: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 13, lineHeight: 17 },
-  emptyRecent: {
+    width: space(11),
+    height: space(11),
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
-    borderStyle: "dashed",
-    paddingVertical: 22,
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.22)",
   },
-  emptyRecentText: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 12.5 },
-
-  footer: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 28 },
-  footerText: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 11.5 },
+  actionTitle: { fontFamily: fonts.sansBold, color: colors.onAccent, fontSize: 16, lineHeight: 22 },
+  actionSub: { ...font.caption, color: "rgba(255,255,255,0.85)", marginTop: space(0.5) },
+  section: { marginTop: space(2), marginBottom: space(2) },
+  listGap: { gap: space(2.5), marginBottom: space(3) },
+  hRow: { gap: space(2.5), paddingRight: space(2) },
+  chipCard: { width: space(32), gap: space(2), alignItems: "flex-start", padding: space(3.5) },
+  chipName: { ...font.small, fontFamily: fonts.sansBold, color: colors.text, lineHeight: 17 },
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space(1.5),
+    marginTop: space(6),
+  },
+  footerText: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textFaint },
 });

@@ -9,7 +9,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ErrorBanner, PillButton, PrimaryButton, Screen, Stagger } from "../components/ui";
-import { colors, fonts, radius, space } from "../theme";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
+import { useLayout } from "../layout";
 import { supabase, supabaseConfigured } from "../lib/supabase";
 import { track } from "../analytics/posthog";
 
@@ -20,13 +21,14 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
+  const { gutter } = useLayout();
 
   async function submit() {
     setError(null);
     setInfo(null);
     const e = email.trim().toLowerCase();
     if (!e || !password) {
-      setError("Email and password required.");
+      setError("Enter your email and password.");
       return;
     }
     if (password.length < 6) {
@@ -35,7 +37,6 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
     }
 
     if (!supabaseConfigured || !supabase) {
-      // Soft mode when Supabase env missing - keep local demos working.
       track(mode === "signin" ? "auth_login" : "auth_signup");
       onLogin(e);
       return;
@@ -60,7 +61,7 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
         }
       }
     } catch (err) {
-      setError((err as Error).message || "Auth failed");
+      setError((err as Error).message || "Could not sign in");
     } finally {
       setBusy(false);
     }
@@ -69,32 +70,26 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
   return (
     <Screen padded={false}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={styles.center}>
+        <View style={[styles.center, { paddingHorizontal: gutter * 1.5 }]}>
           <Stagger index={0}>
-            <Ionicons name="flash" size={22} color={colors.accent} style={{ marginBottom: 6 }} />
+            <View style={styles.brandMark}>
+              <Ionicons name="flash" size={iconSize.md} color={colors.accent} />
+            </View>
           </Stagger>
           <Stagger index={1}>
             <Text style={styles.wordmark}>Verdict</Text>
-            <Text style={styles.tagline}>Internet consensus, in seconds.</Text>
+            <Text style={styles.tagline}>Know before you buy — across Flipkart, Amazon and more.</Text>
           </Stagger>
 
           <Stagger index={2}>
             <View style={styles.form}>
               <View style={styles.modeRow}>
-                <PillButton
-                  label="Sign in"
-                  active={mode === "signin"}
-                  onPress={() => setMode("signin")}
-                />
-                <PillButton
-                  label="Sign up"
-                  active={mode === "signup"}
-                  onPress={() => setMode("signup")}
-                />
+                <PillButton label="Sign in" active={mode === "signin"} onPress={() => setMode("signin")} />
+                <PillButton label="Sign up" active={mode === "signup"} onPress={() => setMode("signup")} />
               </View>
 
               <View style={styles.inputWrap}>
-                <Ionicons name="mail-outline" size={16} color={colors.textFaint} />
+                <Ionicons name="mail-outline" size={iconSize.sm} color={colors.textFaint} />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
@@ -107,7 +102,7 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
                 />
               </View>
               <View style={styles.inputWrap}>
-                <Ionicons name="lock-closed-outline" size={16} color={colors.textFaint} />
+                <Ionicons name="lock-closed-outline" size={iconSize.sm} color={colors.textFaint} />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
@@ -123,13 +118,13 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
               {info ? <Text style={styles.info}>{info}</Text> : null}
 
               <PrimaryButton
-                label={busy ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+                label={busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
                 disabled={busy}
                 onPress={submit}
               />
 
               {!supabaseConfigured && (
-                <Text style={styles.note}>Dev mode - Supabase env missing, local soft-login on.</Text>
+                <Text style={styles.note}>Dev mode — local sign-in (Supabase not configured).</Text>
               )}
             </View>
           </Stagger>
@@ -140,31 +135,40 @@ export function LoginScreen({ onLogin }: { onLogin: (email: string) => void }) {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: space(8) },
-  wordmark: { fontFamily: fonts.serif, fontSize: 46, color: colors.accent, lineHeight: 50, textAlign: "center" },
-  tagline: {
-    fontFamily: fonts.sansSemiBold,
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 6,
-    marginBottom: 36,
-    textAlign: "center",
+  flex: { flex: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  brandMark: {
+    width: space(12),
+    height: space(12),
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: space(3),
   },
-  form: { width: "100%", gap: 12 },
-  modeRow: { flexDirection: "row", gap: 8, marginBottom: 4 },
+  wordmark: { ...font.display, color: colors.text, textAlign: "center" },
+  tagline: {
+    ...font.body,
+    color: colors.textMuted,
+    marginTop: space(2),
+    marginBottom: space(8),
+    textAlign: "center",
+    maxWidth: 300,
+  },
+  form: { width: "100%", gap: space(3) },
+  modeRow: { flexDirection: "row", gap: space(2), marginBottom: space(1) },
   inputWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    gap: space(2.5),
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(3.5),
   },
-  input: { flex: 1, color: colors.text, fontFamily: fonts.sans, fontSize: 14.5, padding: 0 },
-  info: { fontFamily: fonts.sansSemiBold, color: colors.buy, fontSize: 12.5 },
-  note: { fontFamily: fonts.sans, fontSize: 11.5, color: colors.textFaint, textAlign: "center", marginTop: 6 },
+  input: { flex: 1, color: colors.text, ...font.body, padding: 0 },
+  info: { ...font.small, color: colors.buy },
+  note: { ...font.caption, color: colors.textFaint, textAlign: "center", marginTop: space(1) },
 });
