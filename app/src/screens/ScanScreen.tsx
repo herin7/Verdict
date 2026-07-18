@@ -10,7 +10,8 @@ import { ProductThumb, type ThumbStatus } from "../components/ProductThumb";
 import { FadeIn } from "../components/FadeIn";
 import { ScannerFrame } from "../components/ScannerFrame";
 import { ResearchingScreen } from "../components/ResearchingScreen";
-import { colors, fonts, goldGradient, radius, space } from "../theme";
+import { LoadingState } from "../components/ui";
+import { colors, font, fonts, ctaGradient, iconSize, radius, space } from "../theme";
 import { getProductImage, identify, identifyScreen, identifyUrl, research } from "../api/client";
 import { track } from "../analytics/posthog";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
@@ -123,7 +124,7 @@ export function ScanScreen({
   if (!permission && stage !== "paste" && stage !== "identifying" && stage !== "confirm" && stage !== "identifyFailed" && stage !== "researching") {
     return (
       <Center>
-        <ActivityIndicator color={colors.accent} />
+        <LoadingState label="Checking camera…" />
       </Center>
     );
   }
@@ -143,7 +144,7 @@ export function ScanScreen({
         <Text style={styles.info}>Camera access is needed to scan products.</Text>
         <Tappable onPress={requestPermission} style={styles.primaryBtn}>
           <LinearGradient
-            colors={goldGradient}
+            colors={ctaGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.primaryBtnFill}
@@ -306,18 +307,17 @@ export function ScanScreen({
 
       <View style={[styles.topBar, { paddingTop: insets.top + space(3) }]} pointerEvents="box-none">
         <View style={styles.brandPillWrap}>
-          <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="flash" size={12} color={colors.accent} />
+          {showCamera ? <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} /> : null}
+          <Ionicons name="flash" size={iconSize.sm} color={colors.accent} />
           <Text style={styles.brand}>Verdict</Text>
         </View>
-        <Tappable onPress={onHome} style={styles.homeBtnWrap} hitSlop={6}>
-          <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="home-outline" size={18} color={colors.text} />
+        <Tappable onPress={onHome} style={styles.homeBtnWrap} hitSlop={6} accessibilityLabel="Home">
+          {showCamera ? <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} /> : null}
+          <Ionicons name="home-outline" size={iconSize.md} color={showCamera ? colors.onAccent : colors.text} />
         </Tappable>
       </View>
 
       <View style={[styles.sheetWrap, { paddingBottom: insets.bottom + space(6) }]}>
-        <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.sheetHandle} />
 
         {error && (
@@ -333,7 +333,7 @@ export function ScanScreen({
           <FadeIn style={styles.captureArea}>
             <Tappable onPress={stage === "idle" ? capture : undefined} style={styles.shutterOuter}>
               <LinearGradient
-                colors={busy ? ["rgba(255,215,109,0.35)", "rgba(255,215,109,0.2)"] : goldGradient}
+                colors={busy ? [colors.accentSoft, colors.surfaceMuted] : ctaGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.shutterInner}
@@ -345,7 +345,7 @@ export function ScanScreen({
                 )}
               </LinearGradient>
             </Tappable>
-            <Text style={styles.captureLabel}>{stage === "idle" ? "Tap to scan" : "Identifying product..."}</Text>
+            <Text style={styles.captureLabel}>{stage === "idle" ? "Tap to scan" : "Identifying product…"}</Text>
             {stage === "idle" && (
               <Tappable onPress={() => goTo("paste")} style={styles.linkBtn}>
                 <Ionicons name="link-outline" size={14} color={colors.accent} />
@@ -377,7 +377,7 @@ export function ScanScreen({
                 style={styles.flexBtn}
               >
                 <LinearGradient
-                  colors={goldGradient}
+                  colors={ctaGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnFill}
@@ -420,7 +420,7 @@ export function ScanScreen({
               </Tappable>
               <Tappable onPress={confirm} style={styles.flexBtn}>
                 <LinearGradient
-                  colors={goldGradient}
+                  colors={ctaGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnFill}
@@ -466,7 +466,7 @@ export function ScanScreen({
                 style={styles.flexBtn}
               >
                 <LinearGradient
-                  colors={goldGradient}
+                  colors={ctaGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.primaryBtnFill}
@@ -500,14 +500,14 @@ function Center({ children }: { children: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
-  center: { alignItems: "center", justifyContent: "center", padding: 24, gap: 14 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: space(6), gap: space(3.5), backgroundColor: colors.bg },
 
   topBar: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 20,
+    paddingHorizontal: space(5),
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -515,24 +515,26 @@ const styles = StyleSheet.create({
   brandPillWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
+    gap: space(1.5),
+    paddingVertical: space(2),
+    paddingHorizontal: space(3.5),
     borderRadius: radius.pill,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.overlayScrim,
   },
-  brand: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 13.5 },
+  brand: { ...font.small, fontFamily: fonts.sansBold, color: colors.onAccent },
   homeBtnWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: space(9.5),
+    height: space(9.5),
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.overlayScrim,
   },
 
   finderWrap: {
@@ -545,10 +547,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   finderHint: {
+    ...font.small,
     fontFamily: fonts.sansSemiBold,
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 13,
-    marginTop: 22,
+    color: colors.onAccent,
+    marginTop: space(5.5),
+    textShadowColor: colors.overlayScrim,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
 
   sheetWrap: {
@@ -556,98 +561,103 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     overflow: "hidden",
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    gap: 14,
-    borderTopWidth: 1,
-    borderColor: "rgba(255,215,109,0.14)",
+    paddingTop: space(3),
+    paddingHorizontal: space(5),
+    gap: space(3.5),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   sheetHandle: {
     alignSelf: "center",
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.22)",
-    marginBottom: 2,
+    width: space(9),
+    height: space(1),
+    borderRadius: radius.pill,
+    backgroundColor: colors.border,
+    marginBottom: space(0.5),
   },
 
-  captureArea: { alignItems: "center", gap: 10, paddingVertical: 4 },
+  captureArea: { alignItems: "center", gap: space(2.5), paddingVertical: space(1) },
   shutterOuter: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    padding: 5,
-    borderWidth: 2,
-    borderColor: "rgba(255,215,109,0.45)",
+    width: space(18.5),
+    height: space(18.5),
+    borderRadius: radius.pill,
+    borderWidth: 3,
+    borderColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+    padding: space(1),
   },
   shutterInner: {
     flex: 1,
-    borderRadius: 32,
+    width: "100%",
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
-  captureLabel: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 13 },
+  captureLabel: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.textMuted },
 
-  errorRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  error: { fontFamily: fonts.sansSemiBold, color: colors.avoid, fontSize: 13.5, flex: 1 },
+  errorRow: { flexDirection: "row", alignItems: "center", gap: space(2) },
+  error: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.avoid, flex: 1 },
 
-  confirmHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  confirmHeader: { flexDirection: "row", alignItems: "center", gap: space(3) },
   confirmTextWrap: { flex: 1, minWidth: 0 },
-  productName: { fontFamily: fonts.serif, color: colors.text, fontSize: 20, lineHeight: 23 },
-  productMeta: { fontFamily: fonts.sansSemiBold, color: colors.textMuted, fontSize: 12.5, marginTop: 3 },
+  productName: { fontFamily: fonts.serif, color: colors.text, fontSize: 20, lineHeight: 24 },
+  productMeta: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted, marginTop: space(0.75) },
   confidencePill: {
     flexShrink: 0,
     backgroundColor: colors.accentSoft,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingVertical: space(1.25),
+    paddingHorizontal: space(2.5),
     borderRadius: radius.pill,
   },
-  confidenceText: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 12 },
+  confidenceText: { ...font.monoSm, fontFamily: fonts.monoBold, color: colors.accent },
 
-  row: { flexDirection: "row", gap: 10 },
+  row: { flexDirection: "row", gap: space(2.5) },
   flexBtn: { flex: 1, borderRadius: radius.md, overflow: "hidden", minWidth: 0 },
   secondaryBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 14,
-    paddingHorizontal: 10,
+    gap: space(1.5),
+    paddingVertical: space(3.5),
+    paddingHorizontal: space(2.5),
     borderRadius: radius.md,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
-  secondaryBtnText: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14, flexShrink: 1 },
+  secondaryBtnText: { ...font.small, fontFamily: fonts.sansBold, color: colors.text, flexShrink: 1 },
 
-  primaryBtn: { borderRadius: radius.md, overflow: "hidden", marginTop: 4 },
+  primaryBtn: { borderRadius: radius.md, overflow: "hidden", marginTop: space(1) },
   primaryBtnFill: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 14,
-    paddingHorizontal: 10,
+    gap: space(1.5),
+    paddingVertical: space(3.5),
+    paddingHorizontal: space(2.5),
     borderRadius: radius.md,
   },
-  primaryBtnText: { fontFamily: fonts.sansBold, color: colors.onAccent, fontSize: 14, flexShrink: 1 },
+  primaryBtnText: { ...font.small, fontFamily: fonts.sansBold, color: colors.onAccent, flexShrink: 1 },
 
-  info: { fontFamily: fonts.sansSemiBold, color: colors.text, fontSize: 14.5 },
-  linkBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, padding: 8 },
-  linkBtnText: { fontFamily: fonts.sansSemiBold, color: colors.accent, fontSize: 13 },
-  pasteTitle: { fontFamily: fonts.serif, color: colors.text, fontSize: 20 },
+  info: { ...font.bodyMedium, fontFamily: fonts.sansSemiBold, color: colors.text },
+  linkBtn: { flexDirection: "row", alignItems: "center", gap: space(1.5), marginTop: space(2), padding: space(2) },
+  linkBtnText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.accent },
+  pasteTitle: { fontFamily: fonts.serif, color: colors.text, fontSize: 20, lineHeight: 24 },
   pasteInput: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(3),
     color: colors.text,
+    ...font.small,
     fontFamily: fonts.sans,
-    fontSize: 14,
   },
 });

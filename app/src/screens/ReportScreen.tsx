@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import {
-  ActivityIndicator,
   LayoutAnimation,
   ScrollView,
   Share,
@@ -19,17 +18,19 @@ import { GlassCard } from "../components/GlassCard";
 import { Tappable } from "../components/Tappable";
 import { Badge } from "../components/Badge";
 import { ScoreGauge } from "../components/ScoreGauge";
-import { CategoryIcon, Favicon, SourceTypeIcon, categoryIconName } from "../components/Icons";
+import { Favicon, SourceTypeIcon } from "../components/Icons";
 import { VintageIcon } from "../components/VintageIcon";
 import { InsightCard } from "../components/InsightCard";
 import { CompareDealsSection } from "../components/CompareDealsSection";
+import { VerdictTicket } from "../components/VerdictTicket";
+import { LoadingState } from "../components/ui";
 import {
   BestInCategoryContent,
   LongTermContent,
   ScamDetectorContent,
   VersionHistoryContent,
 } from "../components/InsightContent";
-import { colors, font, fonts, goldGradient, radius, space, verdictColor, verdictGradient, verdictLabel } from "../theme";
+import { colors, ctaGradient, font, fonts, radius, space, verdictColor, verdictLabel } from "../theme";
 import { findBuyLinks, getInsight } from "../api/client";
 import { openRetailer } from "../deeplink";
 import type { BuyLink, ConsensusReport, ProductIdentity } from "../types";
@@ -154,32 +155,19 @@ export function ReportScreen({
 
       <ViewShot ref={shotRef} options={{ format: "png", quality: 0.95 }}>
         <View style={styles.heroWrap}>
-          <LinearGradient
-            colors={verdictGradient[report.verdict]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.heroGradient}
-          >
-            <View style={styles.heroProductRow}>
-              <Ionicons name={categoryIconName(product.category)} size={14} color={colors.textMuted} />
-              <Text style={styles.heroProduct} numberOfLines={1}>
-                {product.name}
-              </Text>
+          <VerdictTicket
+            verdict={report.verdict}
+            productTitle={product.name}
+            headline={report.verdictLine}
+            sourceCount={report.sources?.length}
+          />
+          <View style={styles.gaugeRow}>
+            <ScoreGauge score={report.score} color={color} />
+            <View style={{ flex: 1, gap: space(1) }}>
+              <Text style={styles.scoreLabel}>Consensus score</Text>
+              <Text style={styles.scoreHint}>Based on reviews, forums and price history across the web.</Text>
             </View>
-            <View style={styles.heroTop}>
-              <View style={{ flex: 1, gap: 8 }}>
-                <Badge label={verdictLabel[report.verdict]} color={color} icon="flash-outline" />
-                <Text style={styles.verdictLine} numberOfLines={4}>
-                  {report.verdictLine}
-                </Text>
-              </View>
-              <ScoreGauge score={report.score} color={color} />
-            </View>
-            <View style={styles.heroFooter}>
-              <Ionicons name="flash" size={11} color={colors.accent} />
-              <Text style={styles.heroWatermark}>Verdict - internet consensus, in seconds</Text>
-            </View>
-          </LinearGradient>
+          </View>
         </View>
       </ViewShot>
 
@@ -385,8 +373,8 @@ export function ReportScreen({
         </CollapsibleSection>
       )}
 
-      <Tappable onPress={onBack} style={styles.scanAgainWrap}>
-        <LinearGradient colors={goldGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.scanAgain}>
+      <Tappable onPress={onBack} style={styles.scanAgainWrap} accessibilityLabel="Scan another">
+        <LinearGradient colors={ctaGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.scanAgain}>
           <Ionicons name="scan-outline" size={17} color={colors.onAccent} />
           <Text style={styles.scanAgainText}>Scan another</Text>
         </LinearGradient>
@@ -547,7 +535,9 @@ function ExpandableAlternatives({
               )}
 
               {st?.loading && (
-                <ActivityIndicator style={{ marginTop: 8, alignSelf: "flex-start" }} color={colors.accent} size="small" />
+                <View style={{ marginTop: space(2), height: space(8) }}>
+                  <LoadingState label="Finding buy links…" />
+                </View>
               )}
 
               {st?.links && st.links.length > 0 && (
@@ -586,29 +576,34 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: space(5), gap: 14 },
 
-  header: { flexDirection: "row", alignItems: "center", gap: 10 },
+  header: { flexDirection: "row", alignItems: "center", gap: space(2.5) },
   iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: space(9),
+    height: space(9),
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   headerText: { flex: 1 },
   eyebrow: { ...font.label, color: colors.textFaint },
-  product: { fontFamily: fonts.serif, color: colors.text, fontSize: 24, marginTop: 1 },
+  product: { fontFamily: fonts.serif, color: colors.text, fontSize: 22, lineHeight: 28, marginTop: 1 },
 
-  heroWrap: { borderRadius: radius.lg, overflow: "hidden" },
-  heroGradient: { padding: 20 },
-  heroProductRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 },
-  heroProduct: { fontFamily: fonts.sansBold, color: colors.textMuted, fontSize: 12.5, flexShrink: 1 },
-  heroTop: { flexDirection: "row", alignItems: "center", gap: 16 },
-  verdictLine: { fontFamily: fonts.sansSemiBold, color: colors.text, fontSize: 14.5, lineHeight: 20 },
-  heroFooter: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 16 },
-  heroWatermark: { fontFamily: fonts.sansBold, color: colors.textFaint, fontSize: 10.5 },
+  heroWrap: { gap: space(3) },
+  gaugeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space(4),
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: space(4),
+  },
+  scoreLabel: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 15, lineHeight: 20 },
+  scoreHint: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 13, lineHeight: 18 },
 
   section: { gap: 8 },
   deepDiveSection: { gap: 10 },
@@ -647,8 +642,8 @@ const styles = StyleSheet.create({
   altBuyPrice: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 13.5 },
   altBuyEmpty: { fontFamily: fonts.sans, color: colors.textFaint, fontSize: 12, fontStyle: "italic", marginTop: 6 },
 
-  adviceCard: { gap: 8, borderColor: "rgba(255,215,109,0.3)" },
-  adviceHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
+  adviceCard: { gap: space(2), borderColor: colors.accent },
+  adviceHeader: { flexDirection: "row", alignItems: "center", gap: space(2) },
   adviceTitle: { ...font.label, color: colors.accent },
 
   buyCompareLine: {
@@ -660,35 +655,35 @@ const styles = StyleSheet.create({
   buyRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    paddingVertical: space(2.5),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
-  buyRetailerRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  buyRetailerRow: { flexDirection: "row", alignItems: "center", gap: space(2) },
   buyRetailer: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 14, flexShrink: 1 },
   buyTitle: { fontFamily: fonts.sans, color: colors.textMuted, fontSize: 12, marginTop: 1 },
   buyPriceTag: {
     flexShrink: 0,
-    backgroundColor: "rgba(255,215,109,0.12)",
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    backgroundColor: colors.accentSoft,
+    paddingVertical: space(1.5),
+    paddingHorizontal: space(3),
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: "rgba(255,215,109,0.22)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   buyPriceTagBest: {
     backgroundColor: colors.buy,
     borderColor: colors.buy,
   },
-  buyPrice: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 16.5 },
+  buyPrice: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 16 },
   buyPriceBest: { color: colors.onAccent },
   buyCta: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: space(1),
     backgroundColor: colors.accent,
-    paddingVertical: 6,
-    paddingHorizontal: 11,
+    paddingVertical: space(1.5),
+    paddingHorizontal: space(3),
     borderRadius: radius.pill,
   },
   buyCtaText: { fontFamily: fonts.sansBold, color: colors.onAccent, fontSize: 12 },
@@ -698,7 +693,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 9,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: colors.border,
   },
   sourceRowFirst: { borderTopWidth: 0 },
   sourceTitle: { fontFamily: fonts.sansSemiBold, color: colors.text, fontSize: 13.5 },

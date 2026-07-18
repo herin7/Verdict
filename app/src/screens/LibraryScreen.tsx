@@ -1,11 +1,10 @@
 import { FlatList, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { GlassCard } from "../components/GlassCard";
 import { Tappable } from "../components/Tappable";
 import { Badge } from "../components/Badge";
 import { CategoryIcon } from "../components/Icons";
-import { EmptyState, IconButton, Screen, ScreenHeader } from "../components/ui";
-import { colors, fonts, space, verdictColor, verdictLabel } from "../theme";
+import { EmptyState, IconButton, Screen, ScreenHeader, Surface } from "../components/ui";
+import { colors, font, fonts, iconSize, space, verdictColor, verdictLabel } from "../theme";
 import type { SavedReport } from "../types";
 
 function timeAgo(ts: number): string {
@@ -40,7 +39,11 @@ export function LibraryScreen({
       />
 
       {items.length === 0 ? (
-        <EmptyState icon="bookmark-outline" message="Reports you save will show up here." />
+        <EmptyState
+          icon="bookmark-outline"
+          title="Nothing saved yet"
+          message="Reports you save will show up here."
+        />
       ) : (
         <FlatList
           data={items}
@@ -53,10 +56,10 @@ export function LibraryScreen({
           renderItem={({ item }) => {
             const color = verdictColor[item.report.verdict];
             return (
-              <Tappable onPress={() => onOpen(item)}>
-                <GlassCard style={styles.card}>
-                  <CategoryIcon category={item.product.category} size={18} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
+              <Tappable onPress={() => onOpen(item)} accessibilityLabel={item.product.name}>
+                <Surface style={styles.card} padded={false}>
+                  <CategoryIcon category={item.product.category} size={iconSize.md} />
+                  <View style={styles.cardBody}>
                     <Text style={styles.name} numberOfLines={1}>
                       {item.product.name}
                     </Text>
@@ -66,10 +69,14 @@ export function LibraryScreen({
                       <Text style={styles.time}>{timeAgo(item.savedAt)}</Text>
                     </View>
                   </View>
-                  <Tappable onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
-                    <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                  <Tappable
+                    onPress={() => onDelete(item.id)}
+                    style={styles.deleteBtn}
+                    accessibilityLabel="Delete report"
+                  >
+                    <Ionicons name="trash-outline" size={iconSize.sm} color={colors.textMuted} />
                   </Tappable>
-                </GlassCard>
+                </Surface>
               </Tappable>
             );
           }}
@@ -80,11 +87,18 @@ export function LibraryScreen({
 }
 
 const styles = StyleSheet.create({
-  list: { gap: 10, paddingBottom: space(20) },
-  card: { flexDirection: "row", alignItems: "center", padding: 14 },
-  name: { fontFamily: fonts.sansBold, color: colors.text, fontSize: 15 },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
-  score: { fontFamily: fonts.monoBold, color: colors.textMuted, fontSize: 12 },
-  time: { fontFamily: fonts.sansSemiBold, color: colors.textFaint, fontSize: 11.5 },
-  deleteBtn: { padding: 8 },
+  list: { gap: space(2.5), paddingBottom: space(20) },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: space(3.5),
+    paddingHorizontal: space(3.5),
+    gap: space(3),
+  },
+  cardBody: { flex: 1, minWidth: 0 },
+  name: { ...font.bodyMedium, fontFamily: fonts.sansBold, color: colors.text },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: space(2), marginTop: space(1.5) },
+  score: { ...font.monoSm, fontFamily: fonts.monoBold, color: colors.textMuted },
+  time: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textFaint },
+  deleteBtn: { padding: space(2) },
 });
