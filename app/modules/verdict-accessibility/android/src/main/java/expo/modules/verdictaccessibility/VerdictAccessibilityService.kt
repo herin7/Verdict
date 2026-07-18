@@ -216,7 +216,11 @@ class VerdictAccessibilityService : AccessibilityService() {
     lastPackage = pkg
     wasInWatchedApp = true
 
-    if (enteringFresh) signalBubbleVisible(true)
+    if (enteringFresh) {
+      signalBubbleVisible(true)
+      android.util.Log.i("VerdictA11y", "opened watched app pkg=$pkg")
+      VerdictAccessibilityBridge.emit("onAppOpened", mapOf("packageName" to pkg))
+    }
 
     val hot = ScreenProductHeuristic.isProductPage(text, pkg)
     android.util.Log.i(

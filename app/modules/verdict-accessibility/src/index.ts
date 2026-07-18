@@ -78,4 +78,10 @@ export function addLeftShoppingAppListener(cb: () => void): Sub {
   return Native.addListener("onLeftShoppingApp", () => cb());
 }
 
+/** Fires once per session when the foreground app enters the watchlist (e.g. Amazon, Flipkart opened). */
+export function addAppOpenedListener(cb: (packageName: string) => void): Sub {
+  if (!Native?.addListener) return noopSub();
+  return Native.addListener("onAppOpened", (p: { packageName: string }) => cb(p.packageName));
+}
+
 export const isAccessibilitySupported = Platform.OS === "android" && Native != null;

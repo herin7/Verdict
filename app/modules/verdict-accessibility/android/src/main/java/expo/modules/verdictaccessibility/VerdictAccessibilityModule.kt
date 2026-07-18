@@ -11,7 +11,7 @@ class VerdictAccessibilityModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("VerdictAccessibility")
 
-    Events("onScreenText", "onLeftShoppingApp")
+    Events("onScreenText", "onLeftShoppingApp", "onAppOpened")
 
     OnCreate {
       VerdictAccessibilityBridge.emitter = { name, body ->
