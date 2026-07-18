@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { ProductIdentitySchema } from "../schema.js";
 import { researchProduct } from "../services/research.js";
-import { AnakinCreditError } from "../anakin.js";
 import { requireAuth } from "../auth/plugin.js";
+import { normalizeCountry } from "../marketplaces/registry.js";
 
 export async function researchRoute(app: FastifyInstance) {
   app.post("/research", { preHandler: requireAuth }, async (req, reply) => {
@@ -22,9 +22,14 @@ export async function researchRoute(app: FastifyInstance) {
       searchTerm: parsed.data.name,
       ...parsed.data,
     };
+    // The app already sends this (withCountry in api/client.ts) - it was
+    // previously dropped here, which is why the report LLM never knew the
+    // user's currency and would free-text whatever symbol its (often US)
+    // sources used.
+    const country = normalizeCountry((req.body as any)?.country);
     const start = Date.now();
     try {
-      const result = await researchProduct(product, { userId: req.user?.id });
+      const result = await researchProduct(product, { userId: req.user?.id, country });
       req.log.info(
         {
           requestId: req.id,
@@ -53,9 +58,6 @@ export async function researchRoute(app: FastifyInstance) {
         },
         "research_outcome"
       );
-      if (err instanceof AnakinCreditError) {
-        return reply.code(402).send({ error: err.message, code: "out_of_credits" });
-      }
       return reply.code(502).send({ error: (err as Error).message });
     }
   });

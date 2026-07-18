@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ProductIdentitySchema } from "../schema.js";
-import { AnakinCreditError } from "../anakin.js";
 import { fetchInsight } from "../services/insights.js";
 import { requireAuth } from "../auth/plugin.js";
 import type { InsightType } from "../insights.js";
@@ -38,9 +37,6 @@ export async function insightsRoute(app: FastifyInstance) {
       return { type, insight };
     } catch (err) {
       req.log.error(err);
-      if (err instanceof AnakinCreditError) {
-        return reply.code(402).send({ error: err.message, code: "out_of_credits" });
-      }
       return reply.code(502).send({ error: (err as Error).message });
     }
   });

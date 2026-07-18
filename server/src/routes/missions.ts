@@ -34,8 +34,18 @@ export async function missionsRoute(app: FastifyInstance) {
   app.get("/missions", { preHandler: requireAuth }, async (req, reply) => {
     const blocked = missionsGuard(reply);
     if (blocked) return blocked;
-    const items = await listMissions(req.user!.id);
-    return { items, enabled: true };
+    try {
+      const items = await listMissions(req.user!.id);
+      return { items, enabled: true };
+    } catch (err) {
+      // DATABASE_URL being set only means missionsGuard's soft-off check
+      // passes - it doesn't guarantee migrations were actually applied to
+      // THIS database. Degrade to "no missions yet" instead of a raw 500
+      // (same shape the client already treats as "feature unavailable" -
+      // see MissionsScreen.tsx's status.enabled check).
+      req.log.error(err, "listMissions failed - degrading to disabled");
+      return { items: [], enabled: false };
+    }
   });
 
   app.post("/missions", { preHandler: [rejectIfBanned, requireAuth] }, async (req, reply) => {

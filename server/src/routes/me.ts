@@ -4,14 +4,28 @@ import { requireAuth } from "../auth/plugin.js";
 import { dbAvailable } from "../db/client.js";
 import { listSaved, saveReport, unsaveReport } from "../repositories/saved.js";
 import { countScans, listScans } from "../repositories/scans.js";
-import { getPaymentProfile, savePaymentProfile } from "../repositories/paymentProfiles.js";
+import {
+  getPaymentProfile,
+  getUserPincode,
+  savePaymentProfile,
+  savePincode,
+} from "../repositories/paymentProfiles.js";
 import { PAYMENT_CATALOG, type PaymentMethodId } from "../deals/offers.js";
 import type { ConsensusReport } from "../schema.js";
 import type { BuyLink } from "../buylinks.js";
 
 const ProductIdBody = z.object({ productId: z.string().uuid() });
+// methods and pincode are each independently optional - a caller updating
+// only the pincode (e.g. ProfileScreen) must never accidentally wipe the
+// user's saved payment methods by omitting them, and vice versa.
 const PaymentProfileBody = z.object({
-  methods: z.array(z.string()),
+  methods: z.array(z.string()).optional(),
+  /** 6-digit Indian delivery pincode, or null/omitted to leave unchanged. */
+  pincode: z
+    .string()
+    .regex(/^\d{6}$/)
+    .nullable()
+    .optional(),
 });
 
 export async function meRoute(app: FastifyInstance) {
@@ -79,15 +93,29 @@ export async function meRoute(app: FastifyInstance) {
 
   app.get("/me/payment-profile", { preHandler: requireAuth }, async (req, reply) => {
     if (!dbAvailable()) return reply.code(503).send({ error: "Database not configured" });
-    const methods = await getPaymentProfile(req.user!.id);
-    return { methods, catalog: PAYMENT_CATALOG };
+    const [methods, pincode] = await Promise.all([
+      getPaymentProfile(req.user!.id),
+      getUserPincode(req.user!.id),
+    ]);
+    return { methods, pincode, catalog: PAYMENT_CATALOG };
   });
 
   app.put("/me/payment-profile", { preHandler: requireAuth }, async (req, reply) => {
     if (!dbAvailable()) return reply.code(503).send({ error: "Database not configured" });
     const parsed = PaymentProfileBody.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: "methods array required" });
-    await savePaymentProfile(req.user!.id, parsed.data.methods as PaymentMethodId[]);
-    return { ok: true, methods: parsed.data.methods };
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "methods array and/or 6-digit pincode required" });
+    }
+    if (parsed.data.methods !== undefined) {
+      await savePaymentProfile(req.user!.id, parsed.data.methods as PaymentMethodId[]);
+    }
+    if (parsed.data.pincode !== undefined) {
+      await savePincode(req.user!.id, parsed.data.pincode);
+    }
+    const [methods, pincode] = await Promise.all([
+      getPaymentProfile(req.user!.id),
+      getUserPincode(req.user!.id),
+    ]);
+    return { ok: true, methods, pincode };
   });
 }
