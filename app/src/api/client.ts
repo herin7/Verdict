@@ -229,6 +229,36 @@ export async function compareEverywhere(
   });
 }
 
+/**
+ * Progressive-results pair for the /compare pipeline (see server's
+ * routes/compare.ts) - kicks off the same compare work as compareEverywhere
+ * but returns a jobId immediately instead of waiting on the slowest of up to
+ * 8 parallel marketplace scrapes. Poll pollCompareJob on an interval until
+ * `done` - `offers` grows as each marketplace resolves.
+ */
+export async function startCompareJob(
+  product: ProductIdentity,
+  gtin?: string | null,
+  reference?: ReferencePrice | null
+): Promise<{ jobId: string; country: string }> {
+  return api<{ jobId: string; country: string }>("/compare/start", {
+    method: "POST",
+    body: JSON.stringify(
+      await withLocation(await withCountry({ product, gtin: gtin ?? null, reference: reference ?? null }))
+    ),
+  });
+}
+
+export async function pollCompareJob(jobId: string) {
+  return api<{
+    offers: import("../types").MarketplaceOffer[];
+    productId: string | null;
+    cached: boolean;
+    done: boolean;
+    error: string | null;
+  }>(`/compare/poll/${encodeURIComponent(jobId)}`);
+}
+
 export async function fetchDeals(
   product: ProductIdentity,
   methods?: string[],
@@ -267,14 +297,25 @@ export async function directSearch(query: string, methods?: string[]) {
 export async function getPaymentProfile() {
   return api<{
     methods: import("../types").PaymentMethodId[];
+    pincode: string | null;
     catalog: import("../types").PaymentCatalogItem[];
   }>("/me/payment-profile");
 }
 
 export async function savePaymentProfile(methods: string[]) {
-  return api<{ ok: boolean; methods: string[] }>("/me/payment-profile", {
+  return api<{ ok: boolean; methods: string[]; pincode: string | null }>("/me/payment-profile", {
     method: "PUT",
     body: JSON.stringify({ methods }),
+  });
+}
+
+/** Sets the delivery pincode used for location-accurate pricing (see server
+ *  marketplaces/registry.ts pincodeActions) - independent of payment methods,
+ *  never touches them. */
+export async function savePincode(pincode: string) {
+  return api<{ ok: boolean; methods: string[]; pincode: string | null }>("/me/payment-profile", {
+    method: "PUT",
+    body: JSON.stringify({ pincode }),
   });
 }
 

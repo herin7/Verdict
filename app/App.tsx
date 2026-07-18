@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Platform, StyleSheet, View } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Platform, StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -12,21 +12,17 @@ import { Arimo_400Regular, Arimo_500Medium, Arimo_600SemiBold, Arimo_700Bold } f
 import { JetBrainsMono_500Medium, JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono";
 import { ShareIntentProvider, useShareIntentContext } from "expo-share-intent";
 import {
-  addBubbleTapListener,
   canDrawOverlays,
-  consumePanelIntent,
   hideBubble,
   isBubbleVisible,
   isOverlaySupported,
-  moveTaskToBack,
   setBubbleHot,
-  setPanelTranslucent,
   showBubble,
 } from "verdict-overlay";
 import {
+  addAppOpenedListener,
   addLeftShoppingAppListener,
   addScreenTextListener,
-  getCurrentScreenText,
   isAccessibilityServiceEnabled,
   isAccessibilitySupported,
   setWatchlist,
@@ -40,9 +36,10 @@ import { ReportScreen } from "./src/screens/ReportScreen";
 import { LibraryScreen } from "./src/screens/LibraryScreen";
 import { PaymentRewardsScreen } from "./src/screens/PaymentRewardsScreen";
 import { OverlaySettingsScreen } from "./src/screens/OverlaySettingsScreen";
-import { ProductPanelScreen } from "./src/screens/ProductPanelScreen";
 import { MissionsScreen } from "./src/screens/MissionsScreen";
 import { DirectSearchScreen } from "./src/screens/DirectSearchScreen";
+import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { BottomTabBar, type TabId } from "./src/components/BottomTabBar";
 import { colors } from "./src/theme";
 import { WATCHED_PACKAGE_NAMES } from "./src/overlayApps";
 import { detectProductPage } from "./src/detectProductPage";
@@ -65,6 +62,7 @@ import {
 } from "./src/api/client";
 import { supabase, supabaseConfigured } from "./src/lib/supabase";
 import { identify as identifyAnalytics, resetAnalytics, track } from "./src/analytics/posthog";
+import { consumePendingFullReport } from "./src/panelBridge";
 import type { BuyLink, ConsensusReport, ProductIdentity, SavedReport } from "./src/types";
 
 type Screen =
@@ -76,7 +74,14 @@ type Screen =
   | "payments"
   | "overlay"
   | "missions"
-  | "productPanel";
+  | "profile";
+
+/** The four persistent tab roots - the bottom bar shows only on these; every other Screen is a pushed/detail view. */
+const TAB_SCREENS: TabId[] = ["dashboard", "scan", "library", "profile"];
+
+function isTabScreen(s: Screen): s is TabId {
+  return (TAB_SCREENS as Screen[]).includes(s);
+}
 
 type ScreenTextPayload = { text: string; packageName: string };
 
@@ -111,6 +116,8 @@ function AppInner() {
   const [username, setUsername] = useState<string | null>(null);
 
   const [view, setView] = useState<Screen>("dashboard");
+  const [history, setHistory] = useState<Screen[]>([]);
+  const viewRef = useRef<Screen>(view);
   const [current, setCurrent] = useState<SavedReport | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [cameFrom, setCameFrom] = useState<Screen>("scan");
@@ -118,7 +125,6 @@ function AppInner() {
   const [scanCount, setScanCountState] = useState(0);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [screenText, setScreenText] = useState<ScreenTextPayload | null>(null);
-  const [panelPayload, setPanelPayload] = useState<ScreenTextPayload | null>(null);
 
   const latestScreenText = useRef<ScreenTextPayload | null>(null);
   const hotDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,7 +142,7 @@ function AppInner() {
     if (candidate) {
       setShareUrl(candidate.trim());
       setScreenText(null);
-      setView("scan");
+      switchTab("scan");
       resetShareIntent();
     }
   }, [hasShareIntent, shareIntent, resetShareIntent]);
@@ -177,51 +183,86 @@ function AppInner() {
     }
   }, [username]);
 
-  const checkPanelIntent = useCallback(() => {
-    if (Platform.OS !== "android" || !isOverlaySupported) return;
-    const panel = consumePanelIntent();
-    if (!panel?.panel) return;
-    if (panel.text?.trim()) {
-      openProductPanel({
-        text: panel.text,
-        packageName: panel.packageName ?? "unknown",
-      });
-      return;
-    }
-    // Intent extras came in empty (a11y tree was still sparse the instant the
-    // bubble was tapped, even after the native retries) - one more fresh
-    // read now, since the tree usually finishes settling within a beat.
-    if (!isAccessibilitySupported) return;
-    const fresh = getCurrentScreenText();
-    if (fresh.text?.trim()) {
-      openProductPanel({ text: fresh.text, packageName: fresh.packageName ?? "unknown" });
-    }
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  // Push the current screen onto the back-stack, then switch to `next`.
+  // Use this (not setView) for every user-initiated forward navigation so
+  // the hardware back button can unwind it below.
+  function navigate(next: Screen) {
+    setHistory((h) => [...h, viewRef.current]);
+    setView(next);
+  }
+
+  // Pop the back-stack to the previous screen. Returns false (no-op) when
+  // the stack is empty, so callers/handlers can fall back to their own
+  // default (e.g. let the hardware back button exit the app on the root).
+  function goBack(): boolean {
+    if (history.length === 0) return false;
+    const prev = history[history.length - 1];
+    setHistory((h) => h.slice(0, -1));
+    setView(prev);
+    return true;
+  }
+
+  // Switching tabs on the bottom bar isn't a push - it doesn't grow the
+  // back-stack, matching normal tab-bar UX (see the BackHandler fallback
+  // below for what happens when back is pressed on a non-Home tab).
+  function switchTab(tab: TabId) {
+    setView(tab);
+  }
+
+  // Android hardware back: navigate the in-app stack instead of always
+  // closing the app. Only the true root (dashboard, empty stack) falls
+  // through to the default exit behavior. The floating product panel is a
+  // separate overlay surface entirely, not part of this stack - its own
+  // close/back handling lives in VerdictPanelRoot.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (view === "report") {
+        backFromReport();
+        return true;
+      }
+      if (goBack()) return true;
+      // No pushed history left. On a non-Home tab, return to Home first
+      // (standard tab-bar convention) instead of exiting immediately.
+      if (isTabScreen(view) && view !== "dashboard") {
+        setView("dashboard");
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [view, history]);
+
+  // The floating panel does its own identify+research inside its own
+  // surface; when the user taps "open full report" there, it hands the
+  // already-fetched report over via panelBridge (same JS instance, separate
+  // React tree) and brings MainActivity forward - pick it up here instead of
+  // re-identifying/re-researching from scratch.
+  const checkPendingFullReport = useCallback(() => {
+    const pending = consumePendingFullReport();
+    if (!pending) return;
+    openReport(pending.report, pending.product, pending.buyLinks, pending.productId);
   }, []);
 
-  // Cold-start / warm reorder (onNewIntent): consume panel intent extras.
+  // Cold start: the app may have been brought forward specifically to show
+  // a report handed off from the panel.
   useEffect(() => {
     if (!username) return;
-    checkPanelIntent();
-  }, [username, checkPanelIntent]);
+    checkPendingFullReport();
+  }, [username, checkPendingFullReport]);
 
-  // Safety net: bubble tap can bring the Activity forward via onNewIntent
-  // slightly before/without the live bridge event landing. Re-check on
-  // every foreground transition so the panel never gets missed.
+  // Warm foreground transition: same handoff, but the app was already
+  // running when the panel requested it.
   useEffect(() => {
     if (Platform.OS !== "android" || !username) return;
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") checkPanelIntent();
+      if (state === "active") checkPendingFullReport();
     });
     return () => sub.remove();
-  }, [username, checkPanelIntent]);
-
-  useEffect(() => {
-    if (view === "productPanel") {
-      if (isOverlaySupported) setPanelTranslucent(true);
-    } else if (isOverlaySupported) {
-      setPanelTranslucent(false);
-    }
-  }, [view]);
+  }, [username, checkPendingFullReport]);
 
   // Cast-free shopping overlay: watchlist + auto bubble + tap to research
   useEffect(() => {
@@ -254,65 +295,29 @@ function AppInner() {
       if (isOverlaySupported) setBubbleHot(false);
     });
 
-    const tapSub = addBubbleTapListener((payload) => {
-      const fresh = getCurrentScreenText();
-      const text =
-        (payload.text?.trim() ? payload.text : null) ||
-        fresh.text?.trim() ||
-        latestScreenText.current?.text ||
-        null;
-      const packageName =
-        payload.packageName ||
-        fresh.packageName ||
-        latestScreenText.current?.packageName ||
-        "unknown";
-      if (text?.trim()) {
-        const next = { text, packageName };
-        latestScreenText.current = next;
-        track("overlay_bubble_tapped");
-        openProductPanel(next);
-        return;
-      }
-      // Every source came back empty - the a11y tree was still settling
-      // through all of the native retries too. One bounded extra try after
-      // it's had a moment to finish laying out, then give up quietly.
-      setTimeout(() => {
-        const retry = getCurrentScreenText();
-        if (!retry.text?.trim()) return;
-        const next = { text: retry.text, packageName: retry.packageName || "unknown" };
-        latestScreenText.current = next;
-        track("overlay_bubble_tapped");
-        openProductPanel(next);
-      }, 180);
+    // Fires once per session when a watched shopping app comes to the
+    // foreground - the only place that gives us proper visibility into which
+    // marketplace app the user actually opened, regardless of whether they
+    // ever tap the bubble.
+    const openedSub = addAppOpenedListener((packageName) => {
+      track("overlay_app_opened", { packageName });
     });
+
+    // Bubble tap is handled entirely natively now (VerdictOverlayService
+    // shows the "VerdictPanel" surface directly) - it never needs to reach
+    // this JS tree at all, which is what lets the panel appear without
+    // AppInner (or MainActivity) ever coming to the foreground.
 
     return () => {
       if (hotDebounce.current) clearTimeout(hotDebounce.current);
       textSub.remove();
       leftSub.remove();
-      tapSub.remove();
+      openedSub.remove();
     };
   }, [username]);
 
-  function openProductPanel(payload: ScreenTextPayload) {
-    setShareUrl(null);
-    setScreenText(null);
-    setPanelPayload(payload);
-    setView("productPanel");
-    track("overlay_panel_opened");
-  }
-
-  function closeProductPanel() {
-    setPanelPayload(null);
-    setView("dashboard");
-    track("overlay_panel_closed");
-    if (isOverlaySupported) {
-      setPanelTranslucent(false);
-      moveTaskToBack();
-    }
-  }
-
   async function refreshLibrary() {
+    const local = await getSavedReports();
     try {
       const remote = await fetchSavedReports();
       const mapped: SavedReport[] = remote.items
@@ -325,14 +330,19 @@ function AppInner() {
           report: i.report!,
           buyLinks: i.buyLinks ?? [],
         }));
-      if (mapped.length) {
-        setLibrary(mapped);
-        return;
-      }
+      // Reports saved while offline/db-unavailable have no productId (see
+      // openReport/handleToggleSave) and only ever exist in local storage -
+      // merge them in rather than discarding them the moment remote returns
+      // ANY items, which used to make them silently vanish from the Library
+      // UI forever (still sitting in AsyncStorage, just never shown again).
+      const remoteProductIds = new Set(mapped.map((m) => m.productId).filter(Boolean));
+      const localOnly = local.filter((l) => !l.productId || !remoteProductIds.has(l.productId));
+      setLibrary([...mapped, ...localOnly]);
+      return;
     } catch {
       // fall through to local cache
     }
-    setLibrary(await getSavedReports());
+    setLibrary(local);
   }
 
   async function refreshScans() {
@@ -348,6 +358,7 @@ function AppInner() {
   async function handleLogin(name: string) {
     identifyAnalytics(name);
     setUsername(name);
+    setHistory([]);
     setView("dashboard");
   }
 
@@ -355,6 +366,7 @@ function AppInner() {
     track("auth_logout");
     if (supabaseConfigured && supabase) await supabase.auth.signOut();
     setUsername(null);
+    setHistory([]);
     resetAnalytics();
     if (isOverlaySupported && isBubbleVisible()) hideBubble();
   }
@@ -437,7 +449,7 @@ function AppInner() {
   }
 
   function backFromReport() {
-    setView(cameFrom === "overlay" || cameFrom === "productPanel" ? "dashboard" : cameFrom);
+    setView(cameFrom);
     setCurrent(null);
   }
 
@@ -457,7 +469,7 @@ function AppInner() {
   if (!onboardingDone) {
     return (
       <View style={styles.root}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <OnboardingScreen onDone={finishOnboarding} />
       </View>
     );
@@ -466,108 +478,106 @@ function AppInner() {
   if (!username) {
     return (
       <View style={styles.root}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <LoginScreen onLogin={handleLogin} />
       </View>
     );
   }
 
-  const panelOpen = view === "productPanel" && panelPayload;
-
   return (
-    <View style={[styles.root, panelOpen && styles.rootTransparent]}>
-      <StatusBar style="light" />
+    <View style={styles.root}>
+      <StatusBar style="dark" />
 
-      {view === "dashboard" && (
-        <DashboardScreen
-          username={username}
-          scanCount={scanCount}
-          savedCount={library.length}
-          recent={library}
-          onScan={() => {
-            clearScanInputs();
-            setView("scan");
-          }}
-          onSearch={() => setView("search")}
-          onLibrary={() => {
-            track("library_opened");
-            setView("library");
-          }}
-          onPayments={() => setView("payments")}
-          onOverlay={() => setView("overlay")}
-          onMissions={() => setView("missions")}
-          onOpenReport={(entry) => openSaved(entry, "dashboard")}
-          onLogout={handleLogout}
-        />
-      )}
+      <View style={styles.screenArea}>
+        {view === "dashboard" && (
+          <DashboardScreen
+            username={username}
+            scanCount={scanCount}
+            savedCount={library.length}
+            recent={library}
+            onScan={() => {
+              clearScanInputs();
+              switchTab("scan");
+            }}
+            onSearch={() => navigate("search")}
+            onLibrary={() => {
+              track("library_opened");
+              switchTab("library");
+            }}
+            onPayments={() => navigate("payments")}
+            onOverlay={() => navigate("overlay")}
+            onMissions={() => navigate("missions")}
+            onOpenReport={(entry) => openSaved(entry, "dashboard")}
+            onLogout={handleLogout}
+          />
+        )}
 
-      {view === "search" && <DirectSearchScreen onHome={() => setView("dashboard")} />}
+        {view === "search" && <DirectSearchScreen onHome={() => goBack()} />}
 
-      {view === "payments" && <PaymentRewardsScreen onBack={() => setView("dashboard")} />}
+        {view === "payments" && <PaymentRewardsScreen onBack={() => goBack()} />}
 
-      {view === "overlay" && <OverlaySettingsScreen onBack={() => setView("dashboard")} />}
+        {view === "overlay" && <OverlaySettingsScreen onBack={() => goBack()} />}
 
-      {view === "missions" && <MissionsScreen onBack={() => setView("dashboard")} />}
+        {view === "missions" && <MissionsScreen onBack={() => goBack()} />}
 
-      {view === "report" && current && (
-        <ReportScreen
-          report={current.report}
-          product={current.product}
-          buyLinks={current.buyLinks}
-          isSaved={isSaved}
-          onBack={backFromReport}
-          onToggleSave={handleToggleSave}
-        />
-      )}
+        {view === "report" && current && (
+          <ReportScreen
+            report={current.report}
+            product={current.product}
+            buyLinks={current.buyLinks}
+            isSaved={isSaved}
+            onBack={backFromReport}
+            onToggleSave={handleToggleSave}
+          />
+        )}
 
-      {view === "scan" && (
-        <ScanScreen
-          initialUrl={shareUrl}
-          initialScreenText={screenText}
-          onReport={(report, product, buyLinks, productId) => {
-            clearScanInputs();
-            openReport(report, product, buyLinks, productId);
-          }}
-          onHome={() => {
-            clearScanInputs();
-            setView("dashboard");
-          }}
-        />
-      )}
-
-      {view === "library" && (
-        <LibraryScreen
-          items={library}
-          onOpen={(entry) => {
-            track("library_item_opened", { category: entry.product.category });
-            openSaved(entry);
-          }}
-          onDelete={handleDelete}
-          onHome={() => setView("dashboard")}
-        />
-      )}
-
-      {panelOpen && (
-        <View style={StyleSheet.absoluteFill}>
-          <ProductPanelScreen
-            text={panelPayload.text}
-            packageName={panelPayload.packageName}
-            onClose={closeProductPanel}
-            onOpenFullReport={(report, product, buyLinks, productId) => {
-              setPanelPayload(null);
-              setPanelTranslucent(false);
-              setCameFrom("productPanel");
+        {view === "scan" && (
+          <ScanScreen
+            initialUrl={shareUrl}
+            initialScreenText={screenText}
+            onReport={(report, product, buyLinks, productId) => {
+              clearScanInputs();
               openReport(report, product, buyLinks, productId);
             }}
+            onHome={() => {
+              clearScanInputs();
+              switchTab("dashboard");
+            }}
           />
-        </View>
-      )}
+        )}
+
+        {view === "library" && (
+          <LibraryScreen
+            items={library}
+            onOpen={(entry) => {
+              track("library_item_opened", { category: entry.product.category });
+              openSaved(entry);
+            }}
+            onDelete={handleDelete}
+            onHome={() => switchTab("dashboard")}
+          />
+        )}
+
+        {view === "profile" && (
+          <ProfileScreen
+            username={username}
+            scanCount={scanCount}
+            savedCount={library.length}
+            onPayments={() => navigate("payments")}
+            onOverlay={() => navigate("overlay")}
+            onMissions={() => navigate("missions")}
+            onLogout={handleLogout}
+          />
+        )}
+      </View>
+
+      {isTabScreen(view) && <BottomTabBar active={view} onChange={switchTab} />}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  rootTransparent: { backgroundColor: "transparent" },
+  screenArea: { flex: 1 },
   center: { alignItems: "center", justifyContent: "center" },
 });
