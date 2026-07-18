@@ -15,6 +15,20 @@
       "when": 1752349200000,
       "tag": "0001_guardrails_compare_deals",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1752906000000,
+      "tag": "0003_report_currency",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1752906600000,
+      "tag": "0004_user_pincode",
+      "breakpoints": true
     }
   ]
 }

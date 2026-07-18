@@ -16,7 +16,13 @@ export async function getFreshReport(productId: string) {
   return rows[0] ?? null;
 }
 
-export async function upsertReport(productId: string, report: ConsensusReport, model?: string) {
+export async function upsertReport(
+  productId: string,
+  report: ConsensusReport,
+  model?: string,
+  currency?: string | null,
+  country?: string | null
+) {
   const db = getDb();
   const expiresAt = new Date(Date.now() + config.reportTtlDays * 24 * 60 * 60 * 1000);
   const values = {
@@ -24,6 +30,8 @@ export async function upsertReport(productId: string, report: ConsensusReport, m
     report,
     sources: report.sources ?? [],
     model: model ?? config.anthropicModel,
+    currency: currency ?? null,
+    country: country ?? null,
     expiresAt,
     createdAt: new Date(),
   };
@@ -38,6 +46,8 @@ export async function upsertReport(productId: string, report: ConsensusReport, m
           report: values.report,
           sources: values.sources,
           model: values.model,
+          currency: values.currency,
+          country: values.country,
           expiresAt: values.expiresAt,
           createdAt: values.createdAt,
         },

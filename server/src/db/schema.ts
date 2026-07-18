@@ -34,6 +34,13 @@ export const reports = pgTable(
     report: jsonb("report").notNull(),
     sources: jsonb("sources").notNull().default([]),
     model: text("model"),
+    /** Currency ("INR"/"USD") and country ("IN"/"US") the report was generated
+     *  for - a cached report whose currency doesn't match the requesting
+     *  user's country is treated as a cache miss (see services/research.ts),
+     *  so a report generated for a US user is never silently served to an
+     *  IN user (and vice versa) with the wrong currency baked into its text. */
+    currency: text("currency"),
+    country: text("country"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
@@ -143,6 +150,10 @@ export const paymentProfiles = pgTable(
   {
     userId: text("user_id").primaryKey(),
     methods: jsonb("methods").notNull().default([]),
+    /** 6-digit Indian delivery pincode, asked once - passed into Firecrawl
+     *  `actions` (see marketplaces/registry.ts pincodeActions) so scraped
+     *  prices match what the user would actually pay at their own address. */
+    pincode: text("pincode"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   }
 );

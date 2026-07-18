@@ -1,9 +1,28 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { getDb, withDbRetry } from "../db/client.js";
 import { products, scans } from "../db/schema.js";
 
+const DUPLICATE_WINDOW_MS = 60_000;
+
+/**
+ * Records a scan, but skips inserting a duplicate row if the same user
+ * already scanned this exact product within the last minute - a safeguard
+ * against double-counting from retried/duplicate requests (e.g. a client
+ * retry, or two effects firing for the same view), not a general "only log
+ * once per session" throttle. Genuinely separate views/re-scans still each
+ * get their own row.
+ */
 export async function recordScan(userId: string, productId: string) {
   const db = getDb();
+  const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+  const recent = await withDbRetry(() =>
+    db
+      .select({ id: scans.id })
+      .from(scans)
+      .where(and(eq(scans.userId, userId), eq(scans.productId, productId), gt(scans.createdAt, cutoff)))
+      .limit(1)
+  );
+  if (recent[0]) return;
   await withDbRetry(() => db.insert(scans).values({ userId, productId }));
 }
 

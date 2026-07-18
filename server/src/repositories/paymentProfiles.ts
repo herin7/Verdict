@@ -29,3 +29,27 @@ export async function savePaymentProfile(
       })
   );
 }
+
+/** Delivery pincode, asked once - see marketplaces/registry.ts pincodeActions. */
+export async function getUserPincode(userId: string): Promise<string | null> {
+  if (!dbAvailable()) return null;
+  const db = getDb();
+  const rows = await withDbRetry(() =>
+    db.select().from(paymentProfiles).where(eq(paymentProfiles.userId, userId)).limit(1)
+  );
+  return rows[0]?.pincode ?? null;
+}
+
+export async function savePincode(userId: string, pincode: string | null): Promise<void> {
+  if (!dbAvailable()) throw new Error("Database not configured");
+  const db = getDb();
+  await withDbRetry(() =>
+    db
+      .insert(paymentProfiles)
+      .values({ userId, methods: [], pincode, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: paymentProfiles.userId,
+        set: { pincode, updatedAt: new Date() },
+      })
+  );
+}
