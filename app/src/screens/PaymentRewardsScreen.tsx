@@ -4,8 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Tappable } from "../components/Tappable";
 import { FadeIn } from "../components/FadeIn";
-import { Screen, ScreenHeader } from "../components/ui";
-import { colors, fonts, radius, space } from "../theme";
+import { LoadingState, Screen, ScreenHeader, SectionHeader } from "../components/ui";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
 import { getDealsCatalog, getPaymentProfile, savePaymentProfile } from "../api/client";
 import { getLocalPaymentMethods, setLocalPaymentMethods } from "../storage";
 import type { PaymentCatalogItem, PaymentMethodId } from "../types";
@@ -92,11 +92,12 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
       <ScreenHeader title="Payment & Rewards" onBack={onBack} />
 
       <Text style={styles.sub}>
-        Pick cards, wallets, and memberships you own. We never ask for numbers or balances - only what you have.
+        Pick cards, wallets and memberships you own. We never ask for numbers or balances - only what
+        you have.
       </Text>
 
       {loading ? (
-        <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
+        <LoadingState label="Loading your preferences…" />
       ) : (
         <ScrollView
           contentContainerStyle={[styles.scroll, { paddingBottom: space(24) + insets.bottom }]}
@@ -107,14 +108,19 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
             if (!items.length) return null;
             return (
               <FadeIn key={g.kind} style={styles.group}>
-                <Text style={styles.groupTitle}>{g.title}</Text>
+                <SectionHeader title={g.title} />
                 {items.map((item) => {
                   const on = selected.has(item.id);
                   return (
-                    <Tappable key={item.id} onPress={() => toggle(item.id)} style={[styles.row, on && styles.rowOn]}>
+                    <Tappable
+                      key={item.id}
+                      onPress={() => toggle(item.id)}
+                      style={[styles.row, on && styles.rowOn]}
+                      accessibilityLabel={item.label}
+                    >
                       <Ionicons
                         name={on ? "checkbox" : "square-outline"}
-                        size={20}
+                        size={iconSize.md}
                         color={on ? colors.accent : colors.textFaint}
                       />
                       <Text style={[styles.rowLabel, on && styles.rowLabelOn]}>{item.label}</Text>
@@ -131,6 +137,7 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
         onPress={save}
         style={[styles.saveBtn, { bottom: space(6) + insets.bottom }]}
         disabled={saving}
+        accessibilityLabel={saved ? "Saved" : "Save preferences"}
       >
         {saving ? (
           <ActivityIndicator color={colors.onAccent} />
@@ -143,30 +150,22 @@ export function PaymentRewardsScreen({ onBack }: { onBack: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  sub: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18, marginBottom: 16 },
-  scroll: { gap: 8 },
-  group: { marginBottom: 16, gap: 8 },
-  groupTitle: {
-    fontFamily: fonts.sansSemiBold,
-    fontSize: 12,
-    color: colors.textFaint,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
+  sub: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted, marginBottom: space(4) },
+  scroll: { gap: space(2) },
+  group: { marginBottom: space(4), gap: space(2) },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    gap: space(3),
+    paddingVertical: space(3.5),
+    paddingHorizontal: space(3.5),
     borderRadius: radius.md,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: "transparent",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   rowOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  rowLabel: { fontFamily: fonts.sans, fontSize: 15, color: colors.textMuted, flex: 1 },
+  rowLabel: { ...font.body, color: colors.textMuted, flex: 1 },
   rowLabelOn: { color: colors.text, fontFamily: fonts.sansSemiBold },
   saveBtn: {
     position: "absolute",
@@ -175,8 +174,8 @@ const styles = StyleSheet.create({
     bottom: space(6),
     backgroundColor: colors.accent,
     borderRadius: radius.pill,
-    paddingVertical: 16,
+    paddingVertical: space(4),
     alignItems: "center",
   },
-  saveText: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.onAccent },
+  saveText: { ...font.bodyMedium, fontFamily: fonts.sansSemiBold, color: colors.onAccent },
 });

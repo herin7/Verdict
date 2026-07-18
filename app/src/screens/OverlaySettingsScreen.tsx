@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "../components/Tappable";
-import { Divider, PillButton, Screen, ScreenHeader, SectionHeader } from "../components/ui";
-import { colors, fonts, radius, space } from "../theme";
+import { Divider, PillButton, Screen, ScreenHeader, SectionHeader, Surface } from "../components/ui";
+import { colors, font, fonts, iconSize, radius, space } from "../theme";
 import { WATCHED_SHOPPING_APPS } from "../overlayApps";
 import { detectCountry, getCountry, setCountry, type Country } from "../country";
 import {
@@ -65,7 +65,7 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
   return (
     <Screen>
       <ScreenHeader title="Shopping overlay" onBack={onBack} />
-      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: space(10) }}>
+      <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.body}>
           Open a shopping app and Verdict appears automatically. Tap the bubble to research what is
           on screen. No screen casting. No recording prompt.
@@ -73,12 +73,12 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
 
         {ready ? (
           <View style={styles.readyPill}>
-            <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+            <Ionicons name="checkmark-circle" size={iconSize.sm} color={colors.accent} />
             <Text style={styles.readyText}>Ready - auto-detect is on</Text>
           </View>
         ) : (
           <View style={styles.warnPill}>
-            <Ionicons name="alert-circle-outline" size={16} color={colors.wait} />
+            <Ionicons name="alert-circle-outline" size={iconSize.sm} color={colors.wait} />
             <Text style={styles.warnText}>Enable both permissions below</Text>
           </View>
         )}
@@ -158,21 +158,21 @@ export function OverlaySettingsScreen({ onBack }: { onBack: () => void }) {
         </Text>
         <View style={styles.appList}>
           {WATCHED_SHOPPING_APPS.map((app) => (
-            <View key={app.id} style={styles.appRow}>
-              <Ionicons name="bag-handle-outline" size={16} color={colors.accent} />
+            <Surface key={app.id} style={styles.appRow} padded={false}>
+              <Ionicons name="bag-handle-outline" size={iconSize.sm} color={colors.accent} />
               <Text style={styles.appLabel}>{app.label}</Text>
               <Text style={styles.appBadge}>Enabled</Text>
-            </View>
+            </Surface>
           ))}
         </View>
 
-        <View style={styles.blockedBox}>
+        <Surface style={styles.blockedBox}>
           <Text style={styles.blockedTitle}>Blocked</Text>
           <Text style={styles.disclosure}>
             WhatsApp, Instagram, Gmail, banking apps, Photos, and any app not listed above. Screen
             text from those apps is never collected.
           </Text>
-        </View>
+        </Surface>
       </ScrollView>
     </Screen>
   );
@@ -192,97 +192,81 @@ function Row({
   disabled?: boolean;
 }) {
   return (
-    <View style={styles.row}>
+    <Surface style={styles.row} padded={false}>
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowSub}>{subtitle}</Text>
       </View>
-      <Tappable onPress={onPress} style={[styles.action, disabled && { opacity: 0.5 }]} disabled={disabled}>
+      <Tappable onPress={onPress} style={[styles.action, disabled && styles.disabled]} disabled={disabled}>
         <Text style={styles.actionText}>{actionLabel}</Text>
       </Tappable>
-    </View>
+    </Surface>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { fontFamily: fonts.sans, fontSize: 14, color: colors.textMuted, lineHeight: 20 },
-  sectionTitle: { fontFamily: fonts.serif, fontSize: 18, color: colors.text, marginTop: 4 },
-  disclosure: { fontFamily: fonts.sans, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  scroll: { gap: space(3.5), paddingBottom: space(10) },
+  body: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted, lineHeight: 20 },
+  disclosure: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted },
   readyPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    gap: space(2),
+    paddingVertical: space(2.5),
+    paddingHorizontal: space(3),
     borderRadius: radius.md,
     backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: "rgba(255,215,109,0.25)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accent,
   },
-  readyText: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.accent },
+  readyText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.accent },
   warnPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    gap: space(2),
+    paddingVertical: space(2.5),
+    paddingHorizontal: space(3),
     borderRadius: radius.md,
-    backgroundColor: "rgba(255,180,80,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,180,80,0.25)",
+    backgroundColor: colors.waitSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.wait,
   },
-  warnText: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.wait },
+  warnText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.wait },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    gap: space(3),
+    padding: space(3.5),
   },
-  rowTitle: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.text },
-  rowSub: { fontFamily: fonts.sans, fontSize: 12, color: colors.textFaint, marginTop: 4 },
+  rowTitle: { ...font.bodyMedium, fontFamily: fonts.sansSemiBold, color: colors.text },
+  rowSub: { ...font.caption, color: colors.textFaint, marginTop: space(1) },
   action: {
     backgroundColor: colors.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: space(3),
+    paddingVertical: space(2),
     borderRadius: radius.pill,
   },
-  actionText: { fontFamily: fonts.sansBold, fontSize: 12, color: colors.onAccent },
-  divider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 8 },
+  actionText: { ...font.caption, fontFamily: fonts.sansBold, color: colors.onAccent },
+  disabled: { opacity: 0.5 },
   countryRow: { flexDirection: "row", flexWrap: "wrap", gap: space(2) },
-  appList: { gap: 8 },
+  appList: { gap: space(2) },
   appRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
+    gap: space(2.5),
+    paddingVertical: space(2.5),
+    paddingHorizontal: space(3),
   },
-  appLabel: { flex: 1, fontFamily: fonts.sansSemiBold, fontSize: 14, color: colors.text },
+  appLabel: { flex: 1, ...font.small, fontFamily: fonts.sansSemiBold, color: colors.text },
   appBadge: {
-    fontFamily: fonts.sansBold,
-    fontSize: 11,
+    ...font.label,
     color: colors.accent,
     backgroundColor: colors.accentSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: space(2),
+    paddingVertical: space(1),
     borderRadius: radius.pill,
     overflow: "hidden",
   },
-  blockedBox: {
-    padding: 14,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: colors.surfaceBorder,
-    gap: 6,
-  },
-  blockedTitle: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.textMuted },
+  blockedBox: { gap: space(1.5) },
+  blockedTitle: { ...font.small, fontFamily: fonts.sansBold, color: colors.textMuted },
 });
