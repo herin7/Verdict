@@ -88,4 +88,28 @@ assert(
 const legacyRanked = calculateDeals([amazon, flipkart], ["hdfc_cc", "amazon_prime"]);
 assert(legacyRanked.every((d) => d.verifiedDeal === true), "no reference supplied = legacy unconstrained ranking");
 
+// Contaminated / null-price rows and check-manually never become "best deal".
+const nullAfterSanitize = offer({ retailerId: "flipkart", price: null as unknown as number });
+(nullAfterSanitize as { price: number | null }).price = null;
+assert(calculateDeals([nullAfterSanitize], []).length === 0, "null price never ranks as a deal");
+
+const checkManually: MarketplaceOffer = {
+  ...offer({ retailerId: "zepto", price: 100 }),
+  checkManually: true,
+  matchReason: "check_manually",
+};
+assert(calculateDeals([checkManually], []).length === 0, "check-manually rows never rank as deals");
+
+const lowConfidence: MarketplaceOffer = {
+  ...offer({ retailerId: "blinkit", price: 200 }),
+  priceConfidence: 0.3,
+};
+assert(calculateDeals([lowConfidence], []).length === 0, "low-confidence offers never rank as deals");
+
+const weakMatch: MarketplaceOffer = {
+  ...offer({ retailerId: "flipkart", price: 200 }),
+  matchScore: 0.1,
+};
+assert(calculateDeals([weakMatch], []).length === 0, "weak product match never ranks as a deal");
+
 console.log("deals/calculator ok");
