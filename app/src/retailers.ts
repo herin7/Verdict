@@ -34,6 +34,47 @@ const IN_RETAILERS: RetailerMeta[] = [
   { id: "headphonezone", name: "Headphone Zone", kind: "marketplace" },
 ];
 
+/** Stable web domains for favicons - app/deep-link URLs often lack a usable host. */
+const RETAILER_DOMAINS: Record<string, string> = {
+  amazon_in: "amazon.in",
+  amazon_com: "amazon.com",
+  flipkart: "flipkart.com",
+  flipkart_minutes: "flipkart.com",
+  croma: "croma.com",
+  reliance_digital: "reliancedigital.in",
+  vijay_sales: "vijaysales.com",
+  myntra: "myntra.com",
+  ajio: "ajio.com",
+  nykaa: "nykaa.com",
+  tata_1mg: "1mg.com",
+  blinkit: "blinkit.com",
+  zepto: "zeptonow.com",
+  bigbasket: "bigbasket.com",
+  milkbasket: "milkbasket.com",
+  swiggy_instamart: "swiggy.com",
+  meesho: "meesho.com",
+  snapdeal: "snapdeal.com",
+  tatacliq: "tatacliq.com",
+  ikea: "ikea.com",
+  pepperfry: "pepperfry.com",
+  firstcry: "firstcry.com",
+  headphonezone: "headphonezone.in",
+  walmart: "walmart.com",
+  target: "target.com",
+  bestbuy: "bestbuy.com",
+  ebay: "ebay.com",
+  instacart: "instacart.com",
+  gopuff: "gopuff.com",
+};
+
+/** Favicon URL for a retailer; prefers canonical domain over deep-link hosts. */
+export function retailerLogoUrl(retailerId: string, fallbackUrl?: string | null): string {
+  const domain = RETAILER_DOMAINS[retailerId];
+  if (domain) return `https://${domain}/`;
+  if (fallbackUrl) return fallbackUrl;
+  return "https://example.com/";
+}
+
 const US_RETAILERS: RetailerMeta[] = [
   { id: "amazon_com", name: "Amazon", kind: "marketplace", packageHints: ["amazon"] },
   { id: "walmart", name: "Walmart", kind: "marketplace", packageHints: ["walmart"] },
@@ -64,6 +105,22 @@ export function labelForPackage(packageName: string, country: Country = "IN"): s
   }
   if (pkg.includes("amazon")) return "Amazon";
   return "shopping";
+}
+
+/**
+ * The single "hide mismatches" gate on the app side (mirrors the server's
+ * filterOffersByCurrency in marketplaces/normalize.ts - the server should
+ * already have filtered these, but this is the last line of defense before
+ * render). An offer whose currency doesn't match the user's own country
+ * currency is DROPPED, never relabeled: swapping the displayed symbol on a
+ * foreign-currency amount would show a wrong PRICE (a $199 listing rendered
+ * as "₹199" reads as impossibly cheap), which is worse than not showing it.
+ */
+export function filterOffersByCurrency<T extends { currency?: string | null }>(
+  offers: T[],
+  currency: string
+): T[] {
+  return offers.filter((o) => !o.currency || o.currency === currency);
 }
 
 export function groupOffersByKind<T extends { retailerId: string }>(

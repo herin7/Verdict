@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tappable } from "./Tappable";
 import { Badge } from "./Badge";
-import { Card } from "./ui";
+import { Card, EmptyState, LoadingState } from "./ui";
 import { LocationBanner } from "./LocationBanner";
 import { colors, fonts, radius, space } from "../theme";
-import { compareEverywhere, fetchDeals } from "../api/client";
+import { fetchDeals, pollCompareJob, startCompareJob } from "../api/client";
 import { getCountry, type Country } from "../country";
 import { openRetailer } from "../deeplink";
 import { track } from "../analytics/posthog";
 import { formatMoney } from "../format";
-import { groupOffersByKind } from "../retailers";
+import { filterOffersByCurrency, groupOffersByKind, retailerLogoUrl } from "../retailers";
+import { Favicon } from "./Icons";
 import type { MarketplaceOffer, ProductIdentity, RankedDeal, ReferencePrice } from "../types";
 
 export function CompareDealsSection({
@@ -31,7 +32,14 @@ export function CompareDealsSection({
 }) {
   const [offers, setOffers] = useState<MarketplaceOffer[]>(preloaded?.offers ?? []);
   const [deals, setDeals] = useState<RankedDeal[]>(preloaded?.deals ?? []);
-  const [loading, setLoading] = useState(!preloaded);
+  // Deals (ranked) stay a single blocking call - ranking "best deal" needs
+  // the full offer set first, so there's no meaningful way to stream them.
+  const [dealsLoading, setDealsLoading] = useState(!preloaded);
+  // Offers (plain marketplace list) stream in via /compare/start+poll - this
+  // tracks whether that stream has reported done yet, so a genuinely-empty
+  // result (0 offers, done) can be told apart from "still checking" (0
+  // offers, not done) rather than both looking like "no live prices found."
+  const [offersStreaming, setOffersStreaming] = useState(!preloaded);
   const [error, setError] = useState<string | null>(null);
   const [country, setCountryState] = useState<Country>("IN");
 
@@ -42,64 +50,117 @@ export function CompareDealsSection({
   useEffect(() => {
     if (preloaded) return;
     let alive = true;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+    setDealsLoading(true);
+    setOffersStreaming(true);
+    setError(null);
+    setOffers([]);
+    setDeals([]);
+
+    fetchDeals(product, undefined, referencePrice)
+      .then((dealRes) => {
+        if (alive) setDeals(dealRes?.deals ?? []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setDealsLoading(false);
+      });
+
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
-        const [cmp, dealRes] = await Promise.all([
-          compareEverywhere(product, null, referencePrice),
-          fetchDeals(product, undefined, referencePrice).catch(() => null),
-        ]);
-        if (!alive) return;
-        setOffers(cmp.offers ?? []);
-        setDeals(dealRes?.deals ?? []);
-        track("compare_viewed", {
-          category: product.category,
-          offerCount: cmp.offers?.length ?? 0,
-          dealCount: dealRes?.deals?.length ?? 0,
-        });
+        const { jobId } = await startCompareJob(product, null, referencePrice);
+        const poll = async () => {
+          if (!alive) return;
+          try {
+            const res = await pollCompareJob(jobId);
+            if (!alive) return;
+            setOffers(res.offers ?? []);
+            if (res.error) {
+              setError(res.error);
+              setOffersStreaming(false);
+              return;
+            }
+            if (!res.done) {
+              pollTimer = setTimeout(poll, 700);
+              return;
+            }
+            setOffersStreaming(false);
+            track("compare_viewed", { category: product.category, offerCount: res.offers?.length ?? 0 });
+          } catch (e) {
+            if (alive) {
+              setError((e as Error).message);
+              setOffersStreaming(false);
+            }
+          }
+        };
+        poll();
       } catch (e) {
-        if (alive) setError((e as Error).message);
-      } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setError((e as Error).message);
+          setOffersStreaming(false);
+        }
       }
     })();
+
     return () => {
       alive = false;
+      if (pollTimer) clearTimeout(pollTimer);
     };
   }, [product.name, product.searchTerm, preloaded]);
 
-  const grouped = useMemo(() => groupOffersByKind(offers, country), [offers, country]);
   const currency = country === "US" ? "USD" : "INR";
+  // Hide (never relabel) any offer/deal whose currency doesn't match the
+  // user's own country - see filterOffersByCurrency for why.
+  const currencyOffers = useMemo(() => filterOffersByCurrency(offers, currency), [offers, currency]);
+  const currencyDeals = useMemo(
+    () => deals.filter((d) => !d.offer.currency || d.offer.currency === currency),
+    [deals, currency]
+  );
+  const grouped = useMemo(() => groupOffersByKind(currencyOffers, country), [currencyOffers, country]);
 
-  if (loading) {
+  // Keep showing the spinner as long as EITHER path could still produce
+  // something and nothing has arrived yet - not just while both are still
+  // running. Without the `offersStreaming` half here, a fast-but-empty deals
+  // response would flip straight to "no live prices found" while the offers
+  // stream was still actively in flight and might yet add something.
+  if ((dealsLoading || offersStreaming) && !currencyOffers.length && !currencyDeals.length && !error) {
     return (
       <Card>
         <View style={styles.head}>
           <Ionicons name="git-compare-outline" size={16} color={colors.accent} />
-          <Text style={styles.title}>Compare Everywhere</Text>
+          <Text style={styles.title}>Compare everywhere</Text>
         </View>
-        <ActivityIndicator color={colors.accent} style={{ marginVertical: space(4) }} />
+        <LoadingState label="Checking Flipkart, Amazon and more…" />
       </Card>
     );
   }
 
-  if (error) {
+  if (error && !currencyOffers.length && !currencyDeals.length) {
     return (
       <Card>
         <View style={styles.head}>
           <Ionicons name="git-compare-outline" size={16} color={colors.accent} />
-          <Text style={styles.title}>Compare Everywhere</Text>
+          <Text style={styles.title}>Compare everywhere</Text>
         </View>
         <Text style={styles.err}>{error}</Text>
       </Card>
     );
   }
 
-  if (!offers.length && !deals.length) return null;
+  if (!currencyOffers.length && !currencyDeals.length) {
+    return (
+      <Card>
+        <EmptyState
+          icon="pricetag-outline"
+          message="No live prices found for this product right now - try again in a bit."
+        />
+      </Card>
+    );
+  }
 
-  const bestDeal = deals[0];
-  const listSource = deals.length ? deals.map((d) => d.offer) : offers;
+  const bestDeal = currencyDeals[0];
+  const listSource = currencyDeals.length ? currencyDeals.map((d) => d.offer) : currencyOffers;
 
   return (
     <View style={{ gap: space(3.5) }}>
@@ -112,7 +173,9 @@ export function CompareDealsSection({
           <Tappable
             onPress={() => openRetailer(bestDeal.offer.url, bestDeal.offer.retailerId)}
             style={styles.dealHero}
+            accessibilityLabel={`${bestDeal.offer.retailer} best deal`}
           >
+            <Favicon url={retailerLogoUrl(bestDeal.offer.retailerId, bestDeal.offer.url)} size={22} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.dealRetailer}>{bestDeal.offer.retailer}</Text>
               <Text style={styles.dealTitle} numberOfLines={1}>
@@ -126,18 +189,11 @@ export function CompareDealsSection({
             </View>
             <View style={styles.dealPriceCol}>
               {bestDeal.totalSavings > 0 && (
-                <Text style={styles.listStrike}>
-                  {formatMoney(bestDeal.listPrice, bestDeal.offer.currency || currency)}
-                </Text>
+                <Text style={styles.listStrike}>{formatMoney(bestDeal.listPrice, currency)}</Text>
               )}
-              <Text style={styles.finalPrice}>
-                {formatMoney(bestDeal.finalPayable, bestDeal.offer.currency || currency)}
-              </Text>
+              <Text style={styles.finalPrice}>{formatMoney(bestDeal.finalPayable, currency)}</Text>
               {bestDeal.totalSavings > 0 && (
-                <Badge
-                  label={`Save ${formatMoney(bestDeal.totalSavings, bestDeal.offer.currency || currency)}`}
-                  color={colors.buy}
-                />
+                <Badge label={`Save ${formatMoney(bestDeal.totalSavings, currency)}`} color={colors.buy} />
               )}
             </View>
           </Tappable>
@@ -149,14 +205,14 @@ export function CompareDealsSection({
         offers={grouped.marketplaces.length ? grouped.marketplaces : listSource.filter((o) =>
           !grouped.quickCommerce.some((q) => q.url === o.url)
         )}
-        deals={deals}
+        deals={currencyDeals}
         currency={currency}
       />
       {grouped.quickCommerce.length > 0 && <LocationBanner />}
       <OfferList
         title="Quick commerce"
         offers={grouped.quickCommerce}
-        deals={deals}
+        deals={currencyDeals}
         currency={currency}
       />
     </View>
@@ -191,7 +247,9 @@ function OfferList({
               openRetailer(o.url, o.retailerId);
             }}
             style={[styles.row, i === 0 && styles.rowFirst]}
+            accessibilityLabel={`${o.retailer} price`}
           >
+            <Favicon url={retailerLogoUrl(o.retailerId, o.url)} size={20} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.rowRetailer}>{o.retailer}</Text>
               <Text style={styles.rowTitle} numberOfLines={1}>
@@ -208,16 +266,12 @@ function OfferList({
               <View style={styles.priceCol}>
                 {deal && deal.totalSavings > 0 ? (
                   <>
-                    <Text style={styles.listStrike}>
-                      {formatMoney(deal.listPrice, o.currency || currency)}
-                    </Text>
-                    <Text style={styles.rowPrice}>
-                      {formatMoney(deal.finalPayable, o.currency || currency)}
-                    </Text>
+                    <Text style={styles.listStrike}>{formatMoney(deal.listPrice, currency)}</Text>
+                    <Text style={styles.rowPrice}>{formatMoney(deal.finalPayable, currency)}</Text>
                   </>
                 ) : (
                   <Text style={styles.rowPrice}>
-                    {o.price != null ? formatMoney(o.price, o.currency || currency) : o.priceRaw ?? "—"}
+                    {o.price != null ? formatMoney(o.price, currency) : o.priceRaw ?? "—"}
                   </Text>
                 )}
               </View>
@@ -258,7 +312,7 @@ const styles = StyleSheet.create({
     gap: space(2.5),
     paddingVertical: space(2.5),
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.08)",
+    borderTopColor: colors.border,
   },
   rowFirst: { borderTopWidth: 0 },
   rowRetailer: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.text },
