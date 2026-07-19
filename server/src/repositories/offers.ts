@@ -1,7 +1,7 @@
 import { and, eq, gt } from "drizzle-orm";
 import { dbAvailable, getDb, withDbRetry } from "../db/client.js";
 import { marketplaceOffers } from "../db/schema.js";
-import type { MarketplaceOffer } from "../marketplaces/normalize.js";
+import { sanitizeCachedOffers, type MarketplaceOffer } from "../marketplaces/normalize.js";
 import { config } from "../config.js";
 
 export async function getFreshOffers(productId: string): Promise<MarketplaceOffer[] | null> {
@@ -15,7 +15,8 @@ export async function getFreshOffers(productId: string): Promise<MarketplaceOffe
       .limit(1)
   );
   if (!rows[0]) return null;
-  return rows[0].offers as MarketplaceOffer[];
+  const cleaned = sanitizeCachedOffers(rows[0].offers);
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 export async function upsertOffers(productId: string, offers: MarketplaceOffer[]): Promise<void> {
