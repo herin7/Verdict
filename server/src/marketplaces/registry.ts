@@ -1,3 +1,5 @@
+import type { FirecrawlAction } from "../firecrawl.js";
+
 export type Country = "IN" | "US";
 export type MarketplaceKind = "marketplace" | "quick_commerce";
 
@@ -60,10 +62,40 @@ export interface Marketplace {
    *  screen-text identify flow (which only has a packageName, no URL) know which
    *  marketplace the user is currently viewing, for same-platform guards. */
   packageHints?: string[];
+  /**
+   * Firecrawl `actions` sequence that sets the delivery pincode before
+   * extract, so the scraped price matches what the user would actually pay
+   * at their own address instead of the site's default/first-hit price.
+   * Only populated where the exact DOM selectors have been verified against
+   * the live site (see services/compare.ts liveCompare for where this is
+   * invoked) - a platform with no entry here just gets the country-level
+   * `location` hint instead (see `locationAware`), never a guessed selector.
+   */
+  pincodeActions?: (pincode: string) => FirecrawlAction[];
 }
 
 const IN_MARKETPLACES: Marketplace[] = [
-  { id: "amazon_in", name: "Amazon", domains: ["amazon.in", "amzn.in", "amzn.to"], categories: ["general", "electronics", "books"], kind: "marketplace", packageHints: ["amazon"] },
+  {
+    id: "amazon_in",
+    name: "Amazon",
+    domains: ["amazon.in", "amzn.in", "amzn.to"],
+    categories: ["general", "electronics", "books"],
+    kind: "marketplace",
+    packageHints: ["amazon"],
+    // Verified live against amazon.in: #nav-global-location-popover-link opens
+    // the "Deliver to" modal, #GLUXZipUpdateInput is the pincode field inside
+    // it (a long-stable Amazon selector - independently confirmed via public
+    // scraping references, not guessed). Enter submits without needing to
+    // locate the modal's apply-button selector.
+    pincodeActions: (pincode) => [
+      { type: "click", selector: "#nav-global-location-popover-link" },
+      { type: "wait", milliseconds: 1200 },
+      { type: "click", selector: "#GLUXZipUpdateInput" },
+      { type: "write", text: pincode },
+      { type: "press", key: "Enter" },
+      { type: "wait", milliseconds: 1500 },
+    ],
+  },
   { id: "flipkart", name: "Flipkart", domains: ["flipkart.com", "dl.flipkart.com"], categories: ["general", "electronics"], kind: "marketplace", packageHints: ["flipkart"] },
   { id: "croma", name: "Croma", domains: ["croma.com"], categories: ["electronics"], kind: "marketplace", packageHints: ["croma"] },
   { id: "reliance_digital", name: "Reliance Digital", domains: ["reliancedigital.in"], categories: ["electronics"], kind: "marketplace", packageHints: ["reliancedigital", "reliance.digital"] },
@@ -74,6 +106,16 @@ const IN_MARKETPLACES: Marketplace[] = [
   { id: "tata_1mg", name: "Tata 1mg", domains: ["1mg.com"], categories: ["pharmacy"], kind: "marketplace", packageHints: ["tata1mg", "1mg"] },
   // Blinkit has a real web catalog (blinkit.com) but blocks datacenter IPs
   // aggressively - only Firecrawl's enhanced/residential proxy reliably gets in.
+  //
+  // pincodeActions intentionally NOT set here yet: live verification against
+  // blinkit.com found the location-bar trigger
+  // (.LocationBar__Container-sc-x8ezho-6) and the search input
+  // (input[placeholder="search delivery location"]), but typing a pincode
+  // into that box opens an autocomplete dropdown that still needs a click on
+  // the matching suggestion to actually apply it - that suggestion-item
+  // selector was not verified live, and shipping a guessed one risks leaving
+  // the page in a stuck-dropdown state that makes the extract worse, not
+  // better. Verify the suggestion selector before adding this.
   {
     id: "blinkit",
     name: "Blinkit",
@@ -268,6 +310,34 @@ export function isScrapeCapable(m: Marketplace): boolean {
 
 export function scrapeMarketplacesFor(country: Country = "IN"): Marketplace[] {
   return marketplacesFor(country).filter(isScrapeCapable);
+}
+
+/** Prefer marketplaces that sell this category; keep `general` as catch-all. */
+export function scrapeMarketplacesForCategory(
+  country: Country,
+  category: string | null | undefined
+): Marketplace[] {
+  const list = scrapeMarketplacesFor(country);
+  const cat = (category || "general").toLowerCase();
+  const matched = list.filter(
+    (m) => (m.categories as string[]).includes(cat) || (m.categories as string[]).includes("general")
+  );
+  return matched.length ? matched : list;
+}
+
+/** Explicit scrape strategy derived from marketplace flags (no guessed selectors). */
+export function marketplaceStrategy(m: Marketplace): {
+  proxy: "basic" | "enhanced";
+  locationSensitive: boolean;
+  waitMs: number;
+  hasVerifiedPincodeActions: boolean;
+} {
+  return {
+    proxy: m.antiBotStealth ? "enhanced" : "basic",
+    locationSensitive: Boolean(m.locationAware),
+    waitMs: m.pincodeActions ? 2700 : m.locationAware ? 800 : 0,
+    hasVerifiedPincodeActions: Boolean(m.pincodeActions),
+  };
 }
 
 export function deeplinkOnlyMarketplacesFor(country: Country = "IN"): Marketplace[] {
