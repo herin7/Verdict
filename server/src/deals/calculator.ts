@@ -42,11 +42,24 @@ export interface RankedDeal {
  * and the caller degrades to a neutral price display instead of asserting a
  * false "better deal" claim.
  */
+const MIN_PRICE_CONFIDENCE = 0.5;
+
+/** Provenance gate: only validated, confident, priced offers may rank as deals. */
+function hasValidOfferProvenance(offer: MarketplaceOffer): boolean {
+  if (offer.checkManually) return false;
+  if (offer.price == null || offer.price <= 0) return false;
+  if (offer.matchReason === "check_manually") return false;
+  if (offer.priceConfidence != null && offer.priceConfidence < MIN_PRICE_CONFIDENCE) return false;
+  if (offer.matchScore < 0.35) return false;
+  return true;
+}
+
 function isVerifiedDeal(
   offer: MarketplaceOffer,
   finalPayable: number,
   reference: ReferencePrice | null | undefined
 ): boolean {
+  if (!hasValidOfferProvenance(offer)) return false;
   // The user's own current listing (matched by retailerId in applyReferenceGuard)
   // is never "a deal" relative to itself, no matter what card discount applies.
   if (offer.isCurrentListing) return false;

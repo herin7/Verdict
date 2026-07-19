@@ -1,8 +1,8 @@
-import type { ScrapedPage } from "../anakin.js";
-import { CreditTracker, orchestratedExtract, orchestratedScrape } from "../providers/orchestrator.js";
-import { scrapeHtml } from "../anakin.js";
+import type { ScrapedPage } from "../providers/types.js";
+import { orchestratedExtract, orchestratedScrape } from "../providers/orchestrator.js";
 import { firecrawlEnabled, firecrawlScrapeHtml } from "../firecrawl.js";
 import { findMarketplace } from "../marketplaces/registry.js";
+import { coerceStructuredPrice, parsePrice } from "../marketplaces/normalize.js";
 import { ProductIdentitySchema, type ProductIdentity } from "../schema.js";
 import { coerceToSchema } from "../coerce.js";
 import { callToolIdentifyFromText } from "./llmFallback.js";
@@ -23,7 +23,7 @@ export interface UrlIdentifyResult {
 }
 
 const GTIN_RE = /\b(\d{8}|\d{12}|\d{13}|\d{14})\b/;
-const PRICE_RE = /(?:₹|Rs\.?|INR|\$|USD)\s*([\d,]+(?:\.\d{1,2})?)/i;
+
 
 function decodeHtml(s: string): string {
   return s
@@ -92,34 +92,73 @@ function pickGtin(obj: Record<string, unknown>): string | null {
   return null;
 }
 
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/** Prefer sale/current price from Offer / AggregateOffer / priceSpecification. */
 function priceFromOffers(offers: unknown): { price: string | null; currency: string | null } {
   if (!offers) return { price: null, currency: null };
-  const o = Array.isArray(offers) ? offers[0] : offers;
-  if (!o || typeof o !== "object") return { price: null, currency: null };
-  const rec = o as Record<string, unknown>;
-  const price = rec.price ?? rec.lowPrice;
-  const currency = rec.priceCurrency;
-  return {
-    price: price != null ? String(price) : null,
-    currency: typeof currency === "string" ? currency : null,
-  };
+  const list = Array.isArray(offers) ? offers : [offers];
+  for (const item of list) {
+    const rec = asRecord(item);
+    if (!rec) continue;
+    const types = Array.isArray(rec["@type"]) ? rec["@type"] : [rec["@type"]];
+    const isAgg = types.some((t) => String(t || "").toLowerCase().includes("aggregateoffer"));
+
+    const spec = rec.priceSpecification;
+    if (spec) {
+      const specs = Array.isArray(spec) ? spec : [spec];
+      for (const s of specs) {
+        const sr = asRecord(s);
+        if (!sr) continue;
+        const price = sr.price ?? sr.minPrice;
+        const currency = sr.priceCurrency ?? rec.priceCurrency;
+        if (price != null) {
+          return {
+            price: String(price),
+            currency: typeof currency === "string" ? currency : null,
+          };
+        }
+      }
+    }
+
+    const price = isAgg ? (rec.lowPrice ?? rec.price) : (rec.price ?? rec.lowPrice);
+    const currency = rec.priceCurrency;
+    if (price != null) {
+      return {
+        price: String(price),
+        currency: typeof currency === "string" ? currency : null,
+      };
+    }
+  }
+  return { price: null, currency: null };
+}
+
+function validatedPrice(
+  raw: string | null | undefined,
+  currency: string | null | undefined
+): { price: string | null; currency: string | null } {
+  if (raw == null || String(raw).trim() === "") return { price: null, currency: null };
+  const coerced = coerceStructuredPrice(raw, currency ?? null, "INR");
+  if (coerced.amount != null) {
+    return { price: String(coerced.amount), currency: coerced.currency };
+  }
+  // Reject contamination even when a marker exists (ratings with ₹ nearby, etc.)
+  const parsed = parsePrice(String(raw), currency || "INR");
+  if (parsed.amount != null) {
+    return { price: String(parsed.amount), currency: parsed.currency };
+  }
+  return { price: null, currency: null };
 }
 
 async function fetchHtml(url: string): Promise<string | null> {
+  if (!firecrawlEnabled()) return null;
   try {
-    const html = await scrapeHtml(url, { timeoutMs: 15000 });
-    if (html?.trim()) return html;
+    return await firecrawlScrapeHtml(url);
   } catch {
-    // fall through
+    return null;
   }
-  if (firecrawlEnabled()) {
-    try {
-      return await firecrawlScrapeHtml(url);
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 interface PartialIdentity {
@@ -152,12 +191,16 @@ function deterministicFromHtml(url: string, html: string): PartialIdentity {
     brand = metaContent(html, ["product:brand", "og:brand"]);
   }
 
-  const { price: offerPrice, currency } = priceFromOffers(ld.offers);
-  const price =
-    offerPrice ||
-    metaContent(html, ["product:price:amount", "og:price:amount"]) ||
-    html.match(PRICE_RE)?.[1] ||
-    null;
+  const fromLd = priceFromOffers(ld.offers);
+  const metaAmount = metaContent(html, ["product:price:amount", "og:price:amount"]);
+  const metaCurrency = metaContent(html, ["product:price:currency", "og:price:currency"]);
+  const rawPrice = fromLd.price || metaAmount || null;
+  const rawCurrency = fromLd.currency || metaCurrency || null;
+  // No first-currency-number-anywhere fallback - contaminated ratings/reviews
+  // must never become the identified product price.
+  const validated = validatedPrice(rawPrice, rawCurrency);
+  const price = validated.price;
+  const currency = validated.currency;
 
   const gtin = pickGtin(ld);
   const model =
@@ -195,17 +238,17 @@ function isSufficient(partial: PartialIdentity): boolean {
  */
 export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
   const marketplace = findMarketplace(url);
-  const tracker = new CreditTracker();
 
   const [html, structured] = await Promise.all([fetchHtml(url), orchestratedExtract(url)]);
 
-  const scraped = await orchestratedScrape([url], tracker, { oneTimeoutMs: 12000 });
+  const scraped = await orchestratedScrape([url], { oneTimeoutMs: 12000 });
   const page: ScrapedPage | undefined = scraped.get(url);
 
   let partial: PartialIdentity = {};
   if (html) partial = { ...partial, ...deterministicFromHtml(url, html) };
 
   if (structured) {
+    const fromExtract = validatedPrice(structured.price, structured.currency);
     partial = {
       ...partial,
       name: partial.name || structured.title || undefined,
@@ -214,8 +257,8 @@ export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
       searchTerm: partial.searchTerm || structured.title || undefined,
       confidence: Math.max(partial.confidence ?? 0, structured.title ? 0.8 : 0),
       gtin: partial.gtin || structured.gtin || structured.ean || structured.upc || null,
-      price: partial.price || structured.price || null,
-      currency: partial.currency || structured.currency || null,
+      price: partial.price || fromExtract.price || null,
+      currency: partial.currency || fromExtract.currency || null,
     };
   }
 
