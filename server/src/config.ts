@@ -4,14 +4,6 @@ import type { Workload } from "./ai/types.js";
 // dotenv 17 prints a promotional banner to the console on load unless quieted.
 dotenv.config({ quiet: true });
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v || !v.trim()) {
-    throw new Error(`Missing required env var: ${name}`);
-  }
-  return v.trim();
-}
-
 function optional(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
 }
@@ -41,60 +33,24 @@ const ALL_WORKLOADS: Workload[] = [
   "insight_best_in_category",
 ];
 
-/** Today's actual behavior: every workload goes straight to Anthropic. */
-const DEFAULT_AI_POLICY: AiPolicy = Object.fromEntries(
-  ALL_WORKLOADS.map((w) => [w, ["anthropic"]])
-) as AiPolicy;
-
-/**
- * Text-only workloads GLM 4.7 is verified safe for (report + insights - the
- * ones Phase 1's currency-pinning work already covers). Deliberately excludes
- * identify_image (GLM has no vision input at all - confirmed on its Bedrock
- * model card) and identify_screen/identify_url (text-based, but not yet
- * exercised by this canary - keep the blast radius to what's been tested).
- */
-const GLM_CANARY_WORKLOADS: Workload[] = [
-  "report",
-  "insight_long_term",
-  "insight_version",
-  "insight_scam",
-  "insight_best_in_category",
-];
-
-/** zai.glm-5 - confirmed model ID from its Bedrock model card (Converse +
- *  Invoke + Chat Completions/Mantle, text-only, 200K context, 128K max
- *  output - same id works on both the Converse and Mantle endpoints). */
+/** zai.glm-5 - Bedrock model card id (Converse + Mantle Chat Completions).
+ *  Text-only, 200K context, 128K max output. identify_image is vision - GLM
+ *  has none; that workload will fail at the model until a vision id is set
+ *  in BEDROCK_MODEL_MAP. */
 const GLM_MODEL_ID = "zai.glm-5";
 
-/**
- * Canary switch: default OFF (per the locked decision to validate GLM
- * quality/latency on real report/insight traffic before wider rollout).
- * Setting GLM_CANARY_ENABLED=true routes report + insight_* to
- * ["bedrock-mantle","anthropic"] (GLM primary via Bedrock Mantle, Anthropic
- * fallback - runWorkload in ai/gateway.ts already tries providers in order
- * and falls through on any failure/unsupported workload, so Anthropic
- * transparently covers GLM outages/throttling with zero extra code here).
- * Mantle (OpenAI-Chat-Completions-compatible, bearer-key auth) is AWS's own
- * recommended endpoint over the SigV4 Converse API where both are supported.
- * Requires BEDROCK_REGION and BEDROCK_MANTLE_API_KEY to also be set, and
- * zai.glm-5 model access enabled in that region's Bedrock console -
- * ap-south-1 (Mumbai) is in-region for this model and the natural choice for
- * an India-first app.
- */
-const glmCanaryEnabled = ["1", "true", "on"].includes(
-  (process.env.GLM_CANARY_ENABLED ?? "").trim().toLowerCase()
-);
+/** Default: every workload hits Bedrock Mantle GLM only - never Anthropic. */
+const DEFAULT_AI_POLICY: AiPolicy = Object.fromEntries(
+  ALL_WORKLOADS.map((w) => [w, ["bedrock-mantle"]])
+) as AiPolicy;
 
-function glmCanaryPolicyDefaults(): AiPolicy {
-  return Object.fromEntries(GLM_CANARY_WORKLOADS.map((w) => [w, ["bedrock-mantle", "anthropic"]])) as AiPolicy;
-}
-
-function glmCanaryModelMapDefaults(): BedrockModelMap {
-  return Object.fromEntries(GLM_CANARY_WORKLOADS.map((w) => [w, GLM_MODEL_ID])) as BedrockModelMap;
-}
+const DEFAULT_BEDROCK_MODEL_MAP: BedrockModelMap = Object.fromEntries(
+  ALL_WORKLOADS.map((w) => [w, GLM_MODEL_ID])
+) as BedrockModelMap;
 
 export const config = {
-  anthropicApiKey: required("ANTHROPIC_API_KEY"),
+  /** Optional - Anthropic left off the default provider chain. Only used if AI_POLICY explicitly lists "anthropic". */
+  anthropicApiKey: optional("ANTHROPIC_API_KEY"),
   anthropicModel: optional("ANTHROPIC_MODEL", "claude-sonnet-5"),
   port: Number(process.env.PORT) || 8787,
   // Firecrawl is the sole research provider (search/scrape/extract) -
@@ -131,33 +87,28 @@ export const config = {
     Boolean(process.env.DATABASE_URL?.trim()) &&
     !["0", "false", "off"].includes((process.env.MISSIONS_ENABLED ?? "true").trim().toLowerCase()),
 
-  /** AWS region for Bedrock Converse calls. Unset = Bedrock disabled, only Anthropic runs. */
+  /** AWS region for Bedrock Converse/Mantle. Unset = Bedrock providers disabled. */
   bedrockRegion: optional("BEDROCK_REGION"),
   bedrockEnabled: Boolean(process.env.BEDROCK_REGION?.trim()),
-  /** Workload -> Bedrock modelId, e.g. {"identify_screen":"..."}. Shared by both the Converse
-   *  (bedrock) and Mantle (bedrock-mantle) providers - a given model id means the same thing on
-   *  either endpoint, so one map covers both. Workloads missing here can't run on either. */
+  /** Workload -> Bedrock modelId. Shared by Converse (bedrock) and Mantle (bedrock-mantle).
+   *  Defaults all workloads to zai.glm-5; override per workload via BEDROCK_MODEL_MAP. */
   bedrockModelMap: {
-    ...(glmCanaryEnabled ? glmCanaryModelMapDefaults() : {}),
+    ...DEFAULT_BEDROCK_MODEL_MAP,
     ...optionalJson<BedrockModelMap>("BEDROCK_MODEL_MAP", {}),
   } as BedrockModelMap,
 
   /**
    * Bedrock Mantle - OpenAI-Chat-Completions-compatible endpoint, bearer-key
-   * auth (a "long-term API key" generated in the Bedrock console), no AWS
-   * SDK/SigV4/IAM credentials involved. Distinct from bedrockEnabled/
-   * bedrockRegion above, which gate the Converse API path. Reuses
-   * BEDROCK_REGION for the region since Mantle is region-scoped the same way
-   * Converse is; requires BEDROCK_MANTLE_API_KEY on top of that to enable.
+   * auth (long-term API key from Bedrock console). Default LLM path for all
+   * workloads. Reuses BEDROCK_REGION; needs BEDROCK_MANTLE_API_KEY to enable.
    */
   bedrockMantleApiKey: optional("BEDROCK_MANTLE_API_KEY"),
   bedrockMantleEnabled:
     Boolean(process.env.BEDROCK_MANTLE_API_KEY?.trim()) && Boolean(process.env.BEDROCK_REGION?.trim()),
   bedrockMantleBaseUrl: `https://bedrock-mantle.${optional("BEDROCK_REGION", "ap-south-1")}.api.aws/v1`,
-  /** Workload -> ordered provider chain, e.g. {"identify_screen":["bedrock","anthropic"]}. Missing workloads fall back to anthropic-only. */
+  /** Workload -> ordered provider chain. Default: bedrock-mantle only (no Anthropic). */
   aiPolicy: {
     ...DEFAULT_AI_POLICY,
-    ...(glmCanaryEnabled ? glmCanaryPolicyDefaults() : {}),
     ...optionalJson<AiPolicy>("AI_POLICY", {}),
   } as AiPolicy,
 

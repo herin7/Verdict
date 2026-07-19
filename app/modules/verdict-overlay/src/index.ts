@@ -90,8 +90,8 @@ export function addPanelReopenListener(
   );
 }
 
-/** Mirrors VerdictOverlayService.kt's PANEL_*_HEIGHT_FRACTION constants. */
-export const PANEL_MIN_HEIGHT_FRACTION = 0.32;
+/** Mirrors VerdictOverlayService.kt / PanelSnapPolicy stops. */
+export const PANEL_MIN_HEIGHT_FRACTION = 0.24;
 export const PANEL_MAX_HEIGHT_FRACTION = 0.88;
 export const PANEL_DEFAULT_HEIGHT_FRACTION = 0.56;
 

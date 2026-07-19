@@ -130,9 +130,9 @@ export async function runMissionAgent(userId: string, missionId: string) {
       const compare = await compareProduct(product, { country });
       offersCount = compare.offers.length;
       buyLinks = compare.offers.slice(0, 8).map((o) => ({
-        retailer: o.retailerId || o.retailer,
+        retailer: o.retailer,
         url: o.url,
-        price: o.priceRaw ?? (o.price != null ? String(o.price) : null),
+        price: o.price != null ? String(o.price) : null,
       }));
 
       if (country === "IN") {

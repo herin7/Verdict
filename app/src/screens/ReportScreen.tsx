@@ -19,6 +19,8 @@ import { Tappable } from "../components/Tappable";
 import { Badge } from "../components/Badge";
 import { ScoreGauge } from "../components/ScoreGauge";
 import { Favicon, SourceTypeIcon } from "../components/Icons";
+import { PriceText } from "../components/PriceText";
+import { RetailerMark } from "../components/RetailerMark";
 import { VintageIcon } from "../components/VintageIcon";
 import { InsightCard } from "../components/InsightCard";
 import { CompareDealsSection } from "../components/CompareDealsSection";
@@ -55,18 +57,19 @@ interface AltBuyState {
   error?: boolean;
 }
 
-function parsePriceNumber(price: string | null): number | null {
-  if (!price) return null;
-  const digits = price.replace(/[^\d.]/g, "");
+function buyAmount(link: BuyLink): number | null {
+  if (typeof link.amount === "number" && link.amount > 0) return link.amount;
+  if (!link.price) return null;
+  const digits = link.price.replace(/[^\d.]/g, "");
   const n = parseFloat(digits);
   return Number.isFinite(n) ? n : null;
 }
 
-/** Cheapest-first, prices found before unpriced links - so the comparison is actually useful. */
+/** Cheapest-first, priced before unpriced. */
 function sortByPrice(links: BuyLink[]): BuyLink[] {
   return [...links].sort((a, b) => {
-    const pa = parsePriceNumber(a.price);
-    const pb = parsePriceNumber(b.price);
+    const pa = buyAmount(a);
+    const pb = buyAmount(b);
     if (pa === null && pb === null) return 0;
     if (pa === null) return 1;
     if (pb === null) return -1;
@@ -81,6 +84,8 @@ export function ReportScreen({
   isSaved,
   onBack,
   onToggleSave,
+  referencePrice,
+  productIds,
 }: {
   report: ConsensusReport;
   product: ProductIdentity;
@@ -88,6 +93,12 @@ export function ReportScreen({
   isSaved: boolean;
   onBack: () => void;
   onToggleSave: () => void;
+  referencePrice?: import("../types").ReferencePrice | null;
+  productIds?: {
+    asin?: string | null;
+    fsn?: string | null;
+    flipkartItemId?: string | null;
+  } | null;
 }) {
   const color = verdictColor[report.verdict];
   const shotRef = useRef<ViewShotRef>(null);
@@ -175,14 +186,14 @@ export function ReportScreen({
         <Section icon="cart-outline" title="Buy now">
           {(() => {
             const sorted = sortByPrice(buyLinks);
-            const pricedCount = sorted.filter((b) => b.price).length;
-            const bestUrl = pricedCount > 1 ? sorted[0].url : null;
+            const pricedCount = sorted.filter((b) => buyAmount(b) != null).length;
+            const bestUrl = pricedCount > 1 ? sorted[0]!.url : null;
             return (
               <>
                 {pricedCount > 0 && (
                   <Text style={styles.buyCompareLine}>
                     Compared across {sorted.length} platform{sorted.length === 1 ? "" : "s"}
-                    {bestUrl ? ` - lowest is ${sorted[0].price}` : ""}
+                    {bestUrl && sorted[0] ? ` - lowest priced option highlighted` : ""}
                   </Text>
                 )}
                 {sorted.map((b, i) => (
@@ -191,7 +202,7 @@ export function ReportScreen({
                     onPress={() => openRetailer(b.url)}
                     style={[styles.buyRow, i === 0 && styles.sourceRowFirst]}
                   >
-                    <Favicon url={b.url} size={26} />
+                    <RetailerMark retailerId={b.retailerId} name={b.retailer} url={b.url} showName={false} size={26} />
                     <View style={{ flex: 1, marginLeft: 10, minWidth: 0 }}>
                       <View style={styles.buyRetailerRow}>
                         <Text style={styles.buyRetailer} numberOfLines={1}>
@@ -203,11 +214,13 @@ export function ReportScreen({
                         {b.title}
                       </Text>
                     </View>
-                    {b.price ? (
+                    {buyAmount(b) != null ? (
                       <View style={[styles.buyPriceTag, b.url === bestUrl && styles.buyPriceTagBest]}>
-                        <Text style={[styles.buyPrice, b.url === bestUrl && styles.buyPriceBest]}>
-                          {b.price}
-                        </Text>
+                        <PriceText
+                          amount={buyAmount(b)}
+                          currency={b.currency ?? "INR"}
+                          style={[styles.buyPrice, b.url === bestUrl && styles.buyPriceBest]}
+                        />
                       </View>
                     ) : (
                       <View style={styles.buyCta}>
@@ -223,7 +236,7 @@ export function ReportScreen({
         </Section>
       )}
 
-      <CompareDealsSection product={product} />
+      <CompareDealsSection product={product} referencePrice={referencePrice} productIds={productIds} />
 
       <Section icon="chatbubble-ellipses-outline" title="Internet consensus">
         <Text style={styles.body} numberOfLines={6}>
@@ -544,11 +557,11 @@ function ExpandableAlternatives({
                 <View style={{ marginTop: 8, gap: 6 }}>
                   {sortByPrice(st.links).map((b, j) => (
                     <Tappable key={j} onPress={() => openRetailer(b.url)} style={styles.altBuyRow}>
-                      <Favicon url={b.url} size={16} />
+                      <RetailerMark retailerId={b.retailerId} name={b.retailer} url={b.url} showName={false} size={16} />
                       <Text style={styles.altBuyText} numberOfLines={1}>
                         {b.retailer}
                       </Text>
-                      {b.price && <Text style={styles.altBuyPrice}>{b.price}</Text>}
+                      <PriceText amount={buyAmount(b)} currency={b.currency ?? "INR"} style={styles.altBuyPrice} />
                       <Ionicons name="open-outline" size={12} color={colors.textFaint} />
                     </Tappable>
                   ))}

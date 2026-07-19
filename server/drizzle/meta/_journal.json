@@ -17,6 +17,13 @@
       "breakpoints": true
     },
     {
+      "idx": 2,
+      "version": "7",
+      "when": 1752905400000,
+      "tag": "0002_missions_firecrawl",
+      "breakpoints": true
+    },
+    {
       "idx": 3,
       "version": "7",
       "when": 1752906000000,

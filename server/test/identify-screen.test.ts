@@ -33,17 +33,18 @@ function testNoRetryWithoutAnyStrongSignal() {
   assert.equal(message, null, "should accept a low-confidence result as-is when there is no PDP evidence to weigh against it");
 }
 
-function testNoRetryWithoutAName() {
+function testRetriesEmptyName() {
   const hint = buildScreenTextRetryHint({ hasBuyBox: true, hasBreadcrumb: true });
   const message = hint(product({ confidence: 0.2, name: "" }));
-  assert.equal(message, null, "should not retry an empty-name result even with strong signals present");
+  assert.ok(message, "blank name must retry instead of being accepted");
+  assert.ok(message!.toLowerCase().includes("empty") || message!.toLowerCase().includes("name"));
 }
 
 function main() {
   testRetriesWhenStrongSignalButLowConfidence();
   testNoRetryWhenAlreadyConfident();
   testNoRetryWithoutAnyStrongSignal();
-  testNoRetryWithoutAName();
+  testRetriesEmptyName();
   console.log("identify-screen retryHint tests passed");
 }
 

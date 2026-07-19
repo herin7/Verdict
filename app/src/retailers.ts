@@ -95,7 +95,23 @@ export function retailersFor(country: Country): RetailerMeta[] {
 }
 
 export function retailerById(id: string, country: Country = "IN"): RetailerMeta | undefined {
-  return retailersFor(country).find((r) => r.id === id);
+  return (
+    retailersFor(country).find((r) => r.id === id) ||
+    IN_RETAILERS.find((r) => r.id === id) ||
+    US_RETAILERS.find((r) => r.id === id)
+  );
+}
+
+export function resolveRetailerIdFromUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    for (const [id, domain] of Object.entries(RETAILER_DOMAINS)) {
+      if (host === domain || host.endsWith(`.${domain}`)) return id;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function labelForPackage(packageName: string, country: Country = "IN"): string {
@@ -121,6 +137,27 @@ export function filterOffersByCurrency<T extends { currency?: string | null }>(
   currency: string
 ): T[] {
   return offers.filter((o) => !o.currency || o.currency === currency);
+}
+
+/** Mirror server filterPricedOffers: drop missing platforms / check-manually shells. */
+export function filterPricedOffers<
+  T extends { price?: number | null; checkManually?: boolean; matchReason?: string },
+>(offers: T[]): T[] {
+  return offers.filter(
+    (o) => !o.checkManually && o.matchReason !== "check_manually" && o.price != null && o.price > 0
+  );
+}
+
+/** Available priced first, then OOS-with-price, then by amount. */
+export function sortOffersForDeals<T extends { price?: number | null; inStock?: boolean | null }>(
+  offers: T[]
+): T[] {
+  return [...offers].sort((a, b) => {
+    const stockRank = (o: T) => (o.inStock === false ? 1 : 0);
+    const d = stockRank(a) - stockRank(b);
+    if (d !== 0) return d;
+    return (a.price ?? Infinity) - (b.price ?? Infinity);
+  });
 }
 
 export function groupOffersByKind<T extends { retailerId: string }>(

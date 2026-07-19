@@ -16,9 +16,6 @@ android {
 }
 
 dependencies {
-  // This module references com.facebook.react.ReactApplication/ReactSurface
-  // (ReactHost.createSurface) directly - expo-module-gradle-plugin does not
-  // put react-android on an Expo module's own compile classpath by default,
-  // only :app gets it. Same fix expo-dev-launcher's build.gradle uses.
   implementation 'com.facebook.react:react-android'
+  testImplementation 'junit:junit:4.13.2'
 }

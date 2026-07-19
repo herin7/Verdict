@@ -1,6 +1,9 @@
 import {
+  buildPriceCandidate,
   coerceStructuredPrice,
+  payableFromEvidence,
   StructuredProductDataSchema,
+  titleSimilarity,
   type StructuredProductData as ValidatedStructured,
 } from "./marketplaces/normalize.js";
 import { config } from "./config.js";
@@ -147,39 +150,155 @@ const PRODUCT_JSON_PROMPT =
   "recommended products, or MRP when a sale/deal price is shown. Prefer sale price over MRP/list price. " +
   "Include currency as INR or USD. Also extract title, brand, model, GTIN/UPC/EAN, seller, stock, image URL.";
 
-function pickVariantPrice(product: Record<string, unknown>): {
+function variantIdentityKey(v: Record<string, unknown>): string {
+  return [v.gtin, v.sku, v.title, v.name].filter((x) => typeof x === "string" && x.trim()).join("|");
+}
+
+/** Prefer current/sale on matching variant; reject ambiguous multi-variant disagreement. */
+export function pickVariantPrice(
+  product: Record<string, unknown>,
+  prefer?: { gtin?: string | null; sku?: string | null; title?: string | null }
+): {
   price: string | null;
   currency: string | null;
   inStock: boolean | null;
   imageUrl: string | null;
   gtin: string | null;
+  originalPrice: string | null;
 } {
-  const variants = Array.isArray(product.variants) ? product.variants : [];
-  const first = variants.find((v) => v && typeof v === "object") as Record<string, unknown> | undefined;
-  const price =
-    (first?.price != null ? String(first.price) : null) ||
-    (product.price != null ? String(product.price) : null) ||
-    (product.currentPrice != null ? String(product.currentPrice) : null);
+  const variants = Array.isArray(product.variants)
+    ? product.variants.filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object"))
+    : [];
+
+  let chosen: Record<string, unknown> | null = null;
+  if (prefer?.gtin) {
+    chosen = variants.find((v) => String(v.gtin ?? "") === prefer.gtin) ?? null;
+  }
+  if (!chosen && prefer?.sku) {
+    chosen = variants.find((v) => String(v.sku ?? "") === prefer.sku) ?? null;
+  }
+  if (!chosen && prefer?.title) {
+    let best = 0;
+    for (const v of variants) {
+      const t = typeof v.title === "string" ? v.title : typeof v.name === "string" ? v.name : "";
+      const s = titleSimilarity(prefer.title, t);
+      if (s > best && s >= 0.45) {
+        best = s;
+        chosen = v;
+      }
+    }
+  }
+  if (!chosen && variants.length === 1) chosen = variants[0]!;
+  if (!chosen && variants.length > 1) {
+    // Ambiguous variants with materially different payable prices -> no price
+    const amounts = new Set<number>();
+    for (const v of variants) {
+      const cur = v.currentPrice ?? v.price;
+      const cand = buildPriceCandidate({
+        raw: cur != null ? String(cur) : null,
+        context: `${variantIdentityKey(v)} ${cur ?? ""}`,
+        source: "product_format",
+        fieldPath: v.currentPrice != null ? "currentPrice" : "price",
+        declaredCurrency: typeof v.currency === "string" ? v.currency : typeof product.currency === "string" ? product.currency : null,
+        allowBareNumeric: true,
+      });
+      const pay = payableFromEvidence(cand);
+      if (pay) amounts.add(pay.amount);
+    }
+    if (amounts.size > 1) {
+      return {
+        price: null,
+        currency: typeof product.currency === "string" ? product.currency : null,
+        inStock: typeof product.inStock === "boolean" ? product.inStock : null,
+        imageUrl:
+          (typeof product.imageUrl === "string" ? product.imageUrl : null) ||
+          (typeof product.image === "string" ? product.image : null),
+        gtin: typeof product.gtin === "string" ? product.gtin : null,
+        originalPrice: null,
+      };
+    }
+    chosen = variants[0] ?? null;
+  }
+
+  const src = chosen ?? product;
   const currency =
-    (typeof first?.currency === "string" ? first.currency : null) ||
+    (typeof src.currency === "string" ? src.currency : null) ||
     (typeof product.currency === "string" ? product.currency : null);
-  const availability = typeof first?.availability === "string" ? first.availability.toLowerCase() : "";
+
+  const currentRaw = src.currentPrice ?? product.currentPrice;
+  const saleRaw = src.price ?? product.price;
+  const originalRaw = src.originalPrice ?? product.originalPrice;
+
+  const currentCand = buildPriceCandidate({
+    raw: currentRaw != null ? String(currentRaw) : saleRaw != null ? String(saleRaw) : null,
+    context: String(currentRaw ?? saleRaw ?? ""),
+    source: "product_format",
+    fieldPath: currentRaw != null ? "currentPrice" : "price",
+    declaredCurrency: currency,
+    allowBareNumeric: true,
+  });
+  const payable = payableFromEvidence(currentCand);
+
+  const originalCand = buildPriceCandidate({
+    raw: originalRaw != null ? String(originalRaw) : null,
+    context: `M.R.P. ${originalRaw ?? ""}`,
+    source: "product_format",
+    fieldPath: "originalPrice",
+    declaredCurrency: currency,
+    allowBareNumeric: true,
+  });
+
+  // Product-level vs JSON disagreement: if both payable and differ >15%, drop
+  if (chosen && product.price != null && payable) {
+    const rootCand = buildPriceCandidate({
+      raw: String(product.currentPrice ?? product.price),
+      context: String(product.currentPrice ?? product.price),
+      source: "product_format",
+      fieldPath: product.currentPrice != null ? "currentPrice" : "price",
+      declaredCurrency: currency,
+      allowBareNumeric: true,
+    });
+    const rootPay = payableFromEvidence(rootCand);
+    if (
+      rootPay &&
+      Math.abs(rootPay.amount - payable.amount) / Math.max(payable.amount, 1) > 0.15
+    ) {
+      return {
+        price: null,
+        currency,
+        inStock: typeof product.inStock === "boolean" ? product.inStock : null,
+        imageUrl: null,
+        gtin: typeof product.gtin === "string" ? product.gtin : null,
+        originalPrice: null,
+      };
+    }
+  }
+
+  const availability = typeof src.availability === "string" ? src.availability.toLowerCase() : "";
   const inStock =
     typeof product.inStock === "boolean"
       ? product.inStock
       : availability
         ? !/out|unavailable|sold/.test(availability)
         : null;
-  const images = Array.isArray(first?.images) ? first.images : Array.isArray(product.images) ? product.images : [];
+  const images = Array.isArray(src.images) ? src.images : Array.isArray(product.images) ? product.images : [];
   const imageUrl =
     (typeof images[0] === "string" ? images[0] : null) ||
     (typeof product.imageUrl === "string" ? product.imageUrl : null) ||
     (typeof product.image === "string" ? product.image : null);
   const gtin =
-    (typeof first?.gtin === "string" ? first.gtin : null) ||
+    (typeof src.gtin === "string" ? src.gtin : null) ||
     (typeof product.gtin === "string" ? product.gtin : null) ||
     (typeof product.sku === "string" ? product.sku : null);
-  return { price, currency, inStock, imageUrl, gtin };
+
+  return {
+    price: payable ? String(payable.amount) : null,
+    currency: payable ? payable.currency : currency,
+    inStock,
+    imageUrl,
+    gtin,
+    originalPrice: originalCand.amount != null ? String(originalCand.amount) : null,
+  };
 }
 
 function mapProductFormat(raw: unknown): StructuredProductData | null {
@@ -190,14 +309,17 @@ function mapProductFormat(raw: unknown): StructuredProductData | null {
     unknown
   >;
   const picked = pickVariantPrice(product);
-  const coerced = coerceStructuredPrice(picked.price, picked.currency);
+  const coerced = coerceStructuredPrice(picked.price, picked.currency, "INR", {
+    fieldPath: "currentPrice",
+  });
   const candidate = {
     title: typeof product.title === "string" ? product.title : typeof product.name === "string" ? product.name : null,
     brand: typeof product.brand === "string" ? product.brand : null,
     model: typeof product.model === "string" ? product.model : null,
-    // Only pass price if it survived validation — otherwise leave null (never ship ratings)
     price: coerced.amount != null ? String(coerced.amount) : null,
     currency: coerced.amount != null ? coerced.currency : picked.currency,
+    originalPrice: picked.originalPrice,
+    currentPrice: coerced.amount != null ? String(coerced.amount) : null,
     gtin: picked.gtin,
     upc: typeof product.upc === "string" ? product.upc : null,
     ean: typeof product.ean === "string" ? product.ean : null,

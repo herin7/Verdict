@@ -115,7 +115,8 @@ app.get("/health", async (_req, reply) => {
     missions: config.missionsEnabled,
     firecrawl: Boolean(config.firecrawlApiKey),
     providers: {
-      anthropic: "configured" as const,
+      bedrockMantle: config.bedrockMantleEnabled ? ("configured" as const) : ("disabled" as const),
+      anthropic: config.anthropicApiKey ? ("configured" as const) : ("disabled" as const),
       firecrawl: Boolean(config.firecrawlApiKey) ? ("configured" as const) : ("disabled" as const),
       posthog: config.posthogEnabled ? ("configured" as const) : ("disabled" as const),
     },

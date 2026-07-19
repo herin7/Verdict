@@ -33,9 +33,9 @@ for (const id of ["milkbasket", "blinkit", "zepto", "flipkart_minutes", "bigbask
 }
 
 // Per-platform strategy: scrape-capable vs deeplink-only, per research.
-assert(isScrapeCapable(inList.find((m) => m.id === "blinkit")!), "blinkit is scrape-capable");
+assert(!isScrapeCapable(inList.find((m) => m.id === "blinkit")!), "blinkit is location-gated");
 assert(inList.find((m) => m.id === "blinkit")!.antiBotStealth === true, "blinkit requests enhanced proxy");
-assert(isScrapeCapable(inList.find((m) => m.id === "bigbasket")!), "bigbasket is scrape-capable");
+assert(!isScrapeCapable(inList.find((m) => m.id === "bigbasket")!), "bigbasket is location-gated");
 assert(!isScrapeCapable(inList.find((m) => m.id === "zepto")!), "zepto is deeplink-only (signed/session-gated API)");
 assert(!isScrapeCapable(inList.find((m) => m.id === "milkbasket")!), "milkbasket is deeplink-only (no public catalog)");
 assert(

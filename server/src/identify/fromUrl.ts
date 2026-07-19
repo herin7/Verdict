@@ -2,8 +2,8 @@ import type { ScrapedPage } from "../providers/types.js";
 import { orchestratedExtract, orchestratedScrape } from "../providers/orchestrator.js";
 import { firecrawlEnabled, firecrawlScrapeHtml } from "../firecrawl.js";
 import { findMarketplace } from "../marketplaces/registry.js";
-import { coerceStructuredPrice, parsePrice } from "../marketplaces/normalize.js";
-import { ProductIdentitySchema, type ProductIdentity } from "../schema.js";
+import { coerceStructuredPrice } from "../marketplaces/normalize.js";
+import { ProductIdentitySchema, requireProductIdentity, type ProductIdentity } from "../schema.js";
 import { coerceToSchema } from "../coerce.js";
 import { callToolIdentifyFromText } from "./llmFallback.js";
 
@@ -97,8 +97,8 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 }
 
 /** Prefer sale/current price from Offer / AggregateOffer / priceSpecification. */
-function priceFromOffers(offers: unknown): { price: string | null; currency: string | null } {
-  if (!offers) return { price: null, currency: null };
+function priceFromOffers(offers: unknown): { price: string | null; currency: string | null; fieldPath: string } {
+  if (!offers) return { price: null, currency: null, fieldPath: "offers.price" };
   const list = Array.isArray(offers) ? offers : [offers];
   for (const item of list) {
     const rec = asRecord(item);
@@ -109,18 +109,25 @@ function priceFromOffers(offers: unknown): { price: string | null; currency: str
     const spec = rec.priceSpecification;
     if (spec) {
       const specs = Array.isArray(spec) ? spec : [spec];
+      let sale: { price: string; currency: string | null; fieldPath: string } | null = null;
+      let fallback: { price: string; currency: string | null; fieldPath: string } | null = null;
       for (const s of specs) {
         const sr = asRecord(s);
         if (!sr) continue;
+        const name = String(sr.name ?? sr["@type"] ?? "").toLowerCase();
+        if (/list|mrp|strikethrough|was/.test(name)) continue;
         const price = sr.price ?? sr.minPrice;
         const currency = sr.priceCurrency ?? rec.priceCurrency;
-        if (price != null) {
-          return {
-            price: String(price),
-            currency: typeof currency === "string" ? currency : null,
-          };
-        }
+        if (price == null) continue;
+        const entry = {
+          price: String(price),
+          currency: typeof currency === "string" ? currency : null,
+          fieldPath: /sale|deal|current/.test(name) ? "priceSpecification.sale" : "priceSpecification.price",
+        };
+        if (/sale|deal|current|unit/.test(name)) sale = entry;
+        else fallback = fallback ?? entry;
       }
+      if (sale || fallback) return sale ?? fallback!;
     }
 
     const price = isAgg ? (rec.lowPrice ?? rec.price) : (rec.price ?? rec.lowPrice);
@@ -129,25 +136,26 @@ function priceFromOffers(offers: unknown): { price: string | null; currency: str
       return {
         price: String(price),
         currency: typeof currency === "string" ? currency : null,
+        fieldPath: isAgg ? "offers.lowPrice" : "offers.price",
       };
     }
   }
-  return { price: null, currency: null };
+  return { price: null, currency: null, fieldPath: "offers.price" };
 }
 
 function validatedPrice(
   raw: string | null | undefined,
-  currency: string | null | undefined
+  currency: string | null | undefined,
+  fieldPath = "price",
+  context?: string | null
 ): { price: string | null; currency: string | null } {
   if (raw == null || String(raw).trim() === "") return { price: null, currency: null };
-  const coerced = coerceStructuredPrice(raw, currency ?? null, "INR");
+  const coerced = coerceStructuredPrice(raw, currency ?? null, "INR", {
+    fieldPath,
+    context: context ?? String(raw),
+  });
   if (coerced.amount != null) {
     return { price: String(coerced.amount), currency: coerced.currency };
-  }
-  // Reject contamination even when a marker exists (ratings with ₹ nearby, etc.)
-  const parsed = parsePrice(String(raw), currency || "INR");
-  if (parsed.amount != null) {
-    return { price: String(parsed.amount), currency: parsed.currency };
   }
   return { price: null, currency: null };
 }
@@ -196,9 +204,12 @@ function deterministicFromHtml(url: string, html: string): PartialIdentity {
   const metaCurrency = metaContent(html, ["product:price:currency", "og:price:currency"]);
   const rawPrice = fromLd.price || metaAmount || null;
   const rawCurrency = fromLd.currency || metaCurrency || null;
-  // No first-currency-number-anywhere fallback - contaminated ratings/reviews
-  // must never become the identified product price.
-  const validated = validatedPrice(rawPrice, rawCurrency);
+  const validated = validatedPrice(
+    rawPrice,
+    rawCurrency,
+    fromLd.price ? fromLd.fieldPath : "meta.price",
+    rawPrice
+  );
   const price = validated.price;
   const currency = validated.currency;
 
@@ -279,7 +290,7 @@ export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
   };
 
   if (isSufficient(partial)) {
-    const product = ProductIdentitySchema.parse(
+    const product = requireProductIdentity(
       coerceToSchema(ProductIdentitySchema, {
         name: partial.name,
         brand: partial.brand ?? null,

@@ -205,9 +205,12 @@ async function callToolWithValidation<T>(req: LLMToolCallRequest<T>): Promise<LL
 export const anthropicProvider: LLMProvider = {
   name: "anthropic",
   supports() {
-    return true;
+    return Boolean(config.anthropicApiKey);
   },
   callTool<T>(req: LLMToolCallRequest<T>) {
+    if (!config.anthropicApiKey) {
+      throw new Error("Anthropic provider is disabled (ANTHROPIC_API_KEY unset)");
+    }
     return callToolWithValidation(req);
   },
 };

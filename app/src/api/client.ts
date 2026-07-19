@@ -35,6 +35,20 @@ export class ApiError extends Error {
   }
 }
 
+function assertProductIdentity(product: ProductIdentity): ProductIdentity {
+  const name = product?.name?.trim();
+  const searchTerm = product?.searchTerm?.trim() || name;
+  if (!name || !searchTerm) {
+    throw new ApiError("Couldn’t read the product name", 422, "product_identity_incomplete");
+  }
+  return {
+    ...product,
+    name,
+    searchTerm,
+    category: product.category?.trim() || "general",
+  };
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -79,7 +93,7 @@ export async function identify(imageBase64: string): Promise<ProductIdentity> {
     method: "POST",
     body: JSON.stringify({ imageBase64 }),
   });
-  return json.product;
+  return assertProductIdentity(json.product);
 }
 
 export async function research(
@@ -195,28 +209,55 @@ export async function identifyUrl(url: string): Promise<{
     method: "POST",
     body: JSON.stringify(await withCountry({ url })),
   });
-  return { ...json, referencePrice: json.referencePrice ?? null };
+  return { ...json, product: assertProductIdentity(json.product), referencePrice: json.referencePrice ?? null };
 }
 
 export async function identifyScreen(
   text: string,
   packageName: string
-): Promise<{ product: ProductIdentity; referencePrice: ReferencePrice | null }> {
-  const json = await api<{ product: ProductIdentity; referencePrice?: ReferencePrice | null }>(
-    "/identify-screen",
-    {
-      method: "POST",
-      body: JSON.stringify(await withCountry({ text, packageName })),
-    }
-  );
-  return { product: json.product, referencePrice: json.referencePrice ?? null };
+): Promise<{
+  product: ProductIdentity;
+  referencePrice: ReferencePrice | null;
+  asin: string | null;
+  fsn: string | null;
+  flipkartItemId: string | null;
+}> {
+  const json = await api<{
+    product: ProductIdentity;
+    referencePrice?: ReferencePrice | null;
+    asin?: string | null;
+    fsn?: string | null;
+    flipkartItemId?: string | null;
+  }>("/identify-screen", {
+    method: "POST",
+    body: JSON.stringify(await withCountry({ text, packageName })),
+  });
+  return {
+    product: assertProductIdentity(json.product),
+    referencePrice: json.referencePrice ?? null,
+    asin: json.asin ?? null,
+    fsn: json.fsn ?? null,
+    flipkartItemId: json.flipkartItemId ?? null,
+  };
 }
+
+export type CompareIds = {
+  gtin?: string | null;
+  asin?: string | null;
+  fsn?: string | null;
+  flipkartItemId?: string | null;
+  productUrl?: string | null;
+};
 
 export async function compareEverywhere(
   product: ProductIdentity,
-  gtin?: string | null,
+  gtinOrIds?: string | null | CompareIds,
   reference?: ReferencePrice | null
 ) {
+  const ids: CompareIds =
+    gtinOrIds && typeof gtinOrIds === "object"
+      ? gtinOrIds
+      : { gtin: (gtinOrIds as string | null | undefined) ?? null };
   return api<{
     offers: import("../types").MarketplaceOffer[];
     productId: string | null;
@@ -224,7 +265,17 @@ export async function compareEverywhere(
   }>("/compare", {
     method: "POST",
     body: JSON.stringify(
-      await withLocation(await withCountry({ product, gtin: gtin ?? null, reference: reference ?? null }))
+      await withLocation(
+        await withCountry({
+          product,
+          gtin: ids.gtin ?? null,
+          asin: ids.asin ?? null,
+          fsn: ids.fsn ?? null,
+          flipkartItemId: ids.flipkartItemId ?? null,
+          productUrl: ids.productUrl ?? null,
+          reference: reference ?? null,
+        })
+      )
     ),
   });
 }
@@ -238,13 +289,27 @@ export async function compareEverywhere(
  */
 export async function startCompareJob(
   product: ProductIdentity,
-  gtin?: string | null,
+  gtinOrIds?: string | null | CompareIds,
   reference?: ReferencePrice | null
 ): Promise<{ jobId: string; country: string }> {
+  const ids: CompareIds =
+    gtinOrIds && typeof gtinOrIds === "object"
+      ? gtinOrIds
+      : { gtin: (gtinOrIds as string | null | undefined) ?? null };
   return api<{ jobId: string; country: string }>("/compare/start", {
     method: "POST",
     body: JSON.stringify(
-      await withLocation(await withCountry({ product, gtin: gtin ?? null, reference: reference ?? null }))
+      await withLocation(
+        await withCountry({
+          product,
+          gtin: ids.gtin ?? null,
+          asin: ids.asin ?? null,
+          fsn: ids.fsn ?? null,
+          flipkartItemId: ids.flipkartItemId ?? null,
+          productUrl: ids.productUrl ?? null,
+          reference: reference ?? null,
+        })
+      )
     ),
   });
 }
@@ -262,7 +327,8 @@ export async function pollCompareJob(jobId: string) {
 export async function fetchDeals(
   product: ProductIdentity,
   methods?: string[],
-  reference?: ReferencePrice | null
+  reference?: ReferencePrice | null,
+  ids?: CompareIds | null
 ) {
   return api<{
     deals: import("../types").RankedDeal[];
@@ -271,7 +337,20 @@ export async function fetchDeals(
     methodsUsed: string[];
   }>("/deals", {
     method: "POST",
-    body: JSON.stringify(await withLocation(await withCountry({ product, methods, reference: reference ?? null }))),
+    body: JSON.stringify(
+      await withLocation(
+        await withCountry({
+          product,
+          methods,
+          reference: reference ?? null,
+          asin: ids?.asin ?? null,
+          fsn: ids?.fsn ?? null,
+          flipkartItemId: ids?.flipkartItemId ?? null,
+          productUrl: ids?.productUrl ?? null,
+          gtin: ids?.gtin ?? null,
+        })
+      )
+    ),
   });
 }
 

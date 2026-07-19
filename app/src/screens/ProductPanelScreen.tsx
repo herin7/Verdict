@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { MotiView } from "moti";
 import { Tappable } from "../components/Tappable";
 import { VerdictTicket } from "../components/VerdictTicket";
@@ -21,22 +18,15 @@ import {
   SheetHeader,
   TabBar,
 } from "../components/ui";
-import { identifyScreen, research, compareEverywhere } from "../api/client";
+import { identifyScreen, research, compareEverywhere, type CompareIds } from "../api/client";
 import { getCurrentScreenText } from "verdict-accessibility";
-import {
-  PANEL_DEFAULT_HEIGHT_FRACTION,
-  PANEL_MAX_HEIGHT_FRACTION,
-  PANEL_MIN_HEIGHT_FRACTION,
-  resizePanel,
-  snapPanel,
-} from "verdict-overlay";
 import { getCountry, type Country } from "../country";
 import { openRetailer } from "../deeplink";
 import { track } from "../analytics/posthog";
-import { formatMoney } from "../format";
-import { filterOffersByCurrency, groupOffersByKind, labelForPackage, retailerLogoUrl } from "../retailers";
-import { Favicon } from "../components/Icons";
-import { colors, font, fonts, iconSize, motion, radius, space } from "../theme";
+import { PriceText } from "../components/PriceText";
+import { RetailerMark } from "../components/RetailerMark";
+import { filterOffersByCurrency, filterPricedOffers, groupOffersByKind, labelForPackage, sortOffersForDeals } from "../retailers";
+import { colors, font, fonts, motion, radius, space } from "../theme";
 import type {
   BuyLink,
   ConsensusReport,
@@ -47,71 +37,10 @@ import type {
 
 type Tab = "report" | "deal" | "discount";
 
-/**
- * Drags the actual native overlay window's height (see
- * VerdictOverlayService.applyPanelHeight) - this sheet isn't a normal RN
- * modal, it's a real Android window, so resizing it means telling native to
- * resize that window, not just restyling a View. Snap points: 32% / 56% / 88%.
- */
-const SNAP_POINTS: number[] = [0.32, 0.56, 0.88];
-
-function nearestSnap(fraction: number, velocityDy: number, screenH: number): number {
-  // Project a short distance from release velocity (px/ms -> fraction).
-  const projected = fraction + (-velocityDy * 0.18) / screenH;
-  let best = SNAP_POINTS[0];
-  let bestDist = Math.abs(projected - best);
-  for (const p of SNAP_POINTS) {
-    const d = Math.abs(projected - p);
-    if (d < bestDist) {
-      best = p;
-      bestDist = d;
-    }
-  }
-  return Math.min(PANEL_MAX_HEIGHT_FRACTION, Math.max(PANEL_MIN_HEIGHT_FRACTION, best));
-}
-
-function ResizeHandle() {
-  const { height: screenHeight } = useWindowDimensions();
-  const [dragging, setDragging] = useState(false);
-  const fractionRef = useRef(PANEL_DEFAULT_HEIGHT_FRACTION);
-  const startFractionRef = useRef(PANEL_DEFAULT_HEIGHT_FRACTION);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        startFractionRef.current = fractionRef.current;
-        setDragging(true);
-      },
-      onPanResponderMove: (_evt, gesture) => {
-        // Full screen height basis (matches native fraction math).
-        const delta = -gesture.dy / screenHeight;
-        const next = Math.min(
-          PANEL_MAX_HEIGHT_FRACTION,
-          Math.max(PANEL_MIN_HEIGHT_FRACTION, startFractionRef.current + delta)
-        );
-        fractionRef.current = next;
-        resizePanel(next);
-      },
-      onPanResponderRelease: (_evt, gesture) => {
-        setDragging(false);
-        const snapped = nearestSnap(fractionRef.current, gesture.vy, screenHeight);
-        fractionRef.current = snapped;
-        snapPanel(snapped);
-      },
-      onPanResponderTerminate: () => {
-        setDragging(false);
-        const snapped = nearestSnap(fractionRef.current, 0, screenHeight);
-        fractionRef.current = snapped;
-        snapPanel(snapped);
-      },
-    })
-  ).current;
-
+function DecorativeHandle() {
   return (
-    <View {...panResponder.panHandlers} style={styles.handleHitArea}>
-      <View style={[styles.handle, dragging && styles.handleActive]} />
+    <View style={styles.handleHitArea} pointerEvents="none">
+      <View style={styles.handle} />
     </View>
   );
 }
@@ -129,17 +58,19 @@ type Props = {
 };
 
 export function ProductPanelScreen({ text, packageName, onClose, onOpenFullReport }: Props) {
-  const [tab, setTab] = useState<Tab>("report");
+  const [tab, setTab] = useState<Tab>("deal");
   const [stage, setStage] = useState<"identifying" | "researching" | "ready" | "error">("identifying");
   const [error, setError] = useState<string | null>(null);
   const [product, setProduct] = useState<ProductIdentity | null>(null);
   const [referencePrice, setReferencePrice] = useState<ReferencePrice | null>(null);
+  const [productIds, setProductIds] = useState<CompareIds | null>(null);
   const [report, setReport] = useState<ConsensusReport | null>(null);
   const [buyLinks, setBuyLinks] = useState<BuyLink[]>([]);
   const [productId, setProductId] = useState<string | null>(null);
   const [offers, setOffers] = useState<MarketplaceOffer[]>([]);
   const [dealsLoading, setDealsLoading] = useState(false);
   const [country, setCountryState] = useState<Country>("IN");
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     getCountry().then(setCountryState).catch(() => {});
@@ -149,7 +80,10 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
   const currency = country === "US" ? "USD" : "INR";
   // Hide (never relabel) any offer whose currency doesn't match the user's
   // own country - see filterOffersByCurrency for why.
-  const currencyOffers = useMemo(() => filterOffersByCurrency(offers, currency), [offers, currency]);
+  const currencyOffers = useMemo(
+    () => sortOffersForDeals(filterPricedOffers(filterOffersByCurrency(offers, currency))),
+    [offers, currency]
+  );
   const grouped = useMemo(() => groupOffersByKind(currencyOffers, country), [currencyOffers, country]);
 
   useEffect(() => {
@@ -170,13 +104,17 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
           scanText = fresh.text ?? "";
           scanPackage = fresh.packageName ?? packageName;
         }
-        const { product: p, referencePrice: ref } = await identifyScreen(scanText, scanPackage);
+        const { product: p, referencePrice: ref, asin, fsn, flipkartItemId } = await identifyScreen(
+          scanText,
+          scanPackage
+        );
         if (!alive) return;
         setProduct(p);
         // The price already on this screen - authoritative baseline passed to
         // compare/deals so a same-platform re-scrape can never be shown as a
         // "better deal" than what the user is looking at right now.
         setReferencePrice(ref);
+        setProductIds({ asin, fsn, flipkartItemId });
         setStage("researching");
         const res = await research(p);
         if (!alive) return;
@@ -193,23 +131,19 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
     return () => {
       alive = false;
     };
-  }, [text, packageName]);
+  }, [text, packageName, retryKey]);
 
   useEffect(() => {
-    if (stage !== "ready" || !product) return;
-    if (tab !== "discount" && tab !== "deal") return;
+    if (!product || (stage !== "ready" && stage !== "researching")) return;
+    if (tab !== "discount") return;
     let alive = true;
     setDealsLoading(true);
     (async () => {
       try {
-        const cmp = await compareEverywhere(product, null, referencePrice);
+        const cmp = await compareEverywhere(product, productIds, referencePrice);
         if (!alive) return;
         setOffers(cmp?.offers ?? []);
-        // "deal" tab renders its own CompareDealsSection (tracks compare_viewed itself);
-        // this fetch only feeds the visible offer list for the "discount" tab.
-        if (tab === "discount") {
-          track("deals_viewed", { category: product.category, offerCount: cmp?.offers?.length ?? 0 });
-        }
+        track("deals_viewed", { category: product.category, offerCount: cmp?.offers?.length ?? 0 });
       } catch {
         if (alive) setOffers([]);
       } finally {
@@ -229,7 +163,7 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
         transition={{ type: "timing", duration: motion.fast }}
         style={styles.sheet}
       >
-        <ResizeHandle />
+        <DecorativeHandle />
 
         <SheetHeader
           eyebrow={`Over ${label}`}
@@ -241,9 +175,9 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
           value={tab}
           onChange={setTab}
           tabs={[
-            { id: "report", label: "Report", icon: "document-text-outline" },
             { id: "deal", label: "Deal", icon: "trophy-outline" },
             { id: "discount", label: "Discount", icon: "pricetag-outline" },
+            { id: "report", label: "Report", icon: "document-text-outline" },
           ]}
         />
 
@@ -258,7 +192,7 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
             animate={{ opacity: 1, translateX: 0 }}
             transition={{ type: "timing", duration: motion.fast }}
           >
-            {(stage === "identifying" || stage === "researching") && (
+            {(stage === "identifying" || (stage === "researching" && tab === "report")) && (
               <LoadingState
                 label={stage === "identifying" ? "Identifying product…" : "Building consensus…"}
               />
@@ -266,7 +200,21 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
 
             {stage === "error" && (
               <View style={styles.center}>
-                <ErrorBanner message={error ?? "Something went wrong"} />
+                <ErrorBanner
+                  message={
+                    error?.includes("product_identity") || error?.toLowerCase().includes("product name")
+                      ? "Couldn’t read the product name"
+                      : error ?? "Something went wrong"
+                  }
+                />
+                <PrimaryButton
+                  label="Try again"
+                  onPress={() => {
+                    setError(null);
+                    setProduct(null);
+                    setRetryKey((k) => k + 1);
+                  }}
+                />
                 <SecondaryClose onPress={onClose} />
               </View>
             )}
@@ -321,10 +269,8 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
                         onPress={() => openRetailer(l.url).catch(() => {})}
                         style={styles.buyRow}
                       >
-                        <Text style={styles.buyLabel} numberOfLines={1}>
-                          {l.retailer ?? "Shop"}
-                        </Text>
-                        <Text style={styles.buyPrice}>{l.price ?? "Open"}</Text>
+                        <RetailerMark retailerId={l.retailerId} name={l.retailer} url={l.url} />
+                        <PriceText amount={l.amount} currency={l.currency ?? currency} />
                       </Tappable>
                     ))}
                   </Card>
@@ -339,13 +285,13 @@ export function ProductPanelScreen({ text, packageName, onClose, onOpenFullRepor
               </View>
             )}
 
-            {stage === "ready" && product && tab === "deal" && (
+            {product && tab === "deal" && stage !== "error" && stage !== "identifying" && (
               <View style={{ gap: space(3) }}>
-                <CompareDealsSection product={product} referencePrice={referencePrice} />
+                <CompareDealsSection product={product} referencePrice={referencePrice} productIds={productIds} />
               </View>
             )}
 
-            {stage === "ready" && product && tab === "discount" && (
+            {product && tab === "discount" && stage !== "error" && stage !== "identifying" && (
               <View style={{ gap: space(3) }}>
                 {dealsLoading && <LoadingState label="Fetching offers…" />}
                 {!dealsLoading && (
@@ -395,41 +341,36 @@ function OfferGroup({
   return (
     <View style={{ gap: space(2.5) }}>
       <Text style={styles.groupTitle}>{title}</Text>
-      {offers.slice(0, 8).map((o, i) => (
-        <Tappable
-          key={`${o.url}-${i}`}
-          onPress={() => {
-            if (!o.url) return;
-            track("marketplace_deeplink_opened", { platform: o.retailerId, manual: Boolean(o.checkManually) });
-            openRetailer(o.url, o.retailerId).catch(() => {});
-          }}
-          style={styles.offerRow}
-          accessibilityLabel={`${o.retailer} price`}
-        >
-          <Favicon url={retailerLogoUrl(o.retailerId, o.url)} size={20} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.offerMarket}>{o.retailer}</Text>
-            <Text style={styles.offerTitle} numberOfLines={2}>
-              {o.checkManually ? "Live price not available" : o.title ?? productName}
-            </Text>
-            {!o.checkManually && o.coupons?.length > 0 && (
-              <Text style={styles.muted} numberOfLines={1}>
-                {o.coupons.slice(0, 2).join(" · ")}
+      {offers.slice(0, 8).map((o, i) => {
+        const oos = o.inStock === false;
+        return (
+          <Tappable
+            key={`${o.url}-${i}`}
+            onPress={() => {
+              if (!o.url) return;
+              track("marketplace_deeplink_opened", { platform: o.retailerId, manual: false });
+              openRetailer(o.url, o.retailerId).catch(() => {});
+            }}
+            style={[styles.offerRow, oos && { opacity: 0.85 }]}
+            accessibilityLabel={`${o.retailer} ${oos ? "out of stock" : "price"}`}
+          >
+            <RetailerMark retailerId={o.retailerId} name={o.retailer} url={o.url} showName={false} size={20} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.offerMarket}>{o.retailer}</Text>
+              <Text style={styles.offerTitle} numberOfLines={2}>
+                {o.title ?? productName}
               </Text>
-            )}
-          </View>
-          {o.checkManually ? (
-            <View style={styles.manualRow}>
-              <Ionicons name="open-outline" size={iconSize.sm} color={colors.textMuted} />
-              <Text style={styles.manualText}>Check manually</Text>
+              {oos && <Text style={styles.oosLabel}>Out of stock</Text>}
+              {!oos && o.coupons?.length > 0 && (
+                <Text style={styles.muted} numberOfLines={1}>
+                  {o.coupons.slice(0, 2).join(" · ")}
+                </Text>
+              )}
             </View>
-          ) : (
-            <Text style={styles.offerPrice}>
-              {o.price != null ? formatMoney(o.price, currency) : o.priceRaw ?? "-"}
-            </Text>
-          )}
-        </Tappable>
-      ))}
+            <PriceText amount={o.price} currency={currency} style={styles.offerPrice} />
+          </Tappable>
+        );
+      })}
     </View>
   );
 }
@@ -500,6 +441,5 @@ const styles = StyleSheet.create({
   offerMarket: { ...font.monoSm, color: colors.accent },
   offerTitle: { ...font.small, fontFamily: fonts.sans, color: colors.text },
   offerPrice: { ...font.monoSm, fontFamily: fonts.mono, color: colors.text },
-  manualRow: { flexDirection: "row", alignItems: "center", gap: space(1) },
-  manualText: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted },
+  oosLabel: { fontFamily: fonts.sansSemiBold, fontSize: 11, color: colors.avoid, marginTop: 2 },
 });

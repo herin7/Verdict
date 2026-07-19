@@ -15,9 +15,13 @@ export interface ReportSource {
 
 export interface BuyLink {
   retailer: string;
+  retailerId?: string;
   url: string;
   title: string;
-  price: string | null;
+  amount: number | null;
+  currency: string | null;
+  /** @deprecated legacy string prices — prefer amount */
+  price?: string | null;
 }
 
 export interface ConsensusReport {
@@ -48,6 +52,13 @@ export interface SavedReport {
   report: ConsensusReport;
   buyLinks: BuyLink[];
   productId?: string | null;
+  referencePrice?: ReferencePrice | null;
+  /** ASIN / FSN from identify-screen for direct marketplace fetch. */
+  productIds?: {
+    asin?: string | null;
+    fsn?: string | null;
+    flipkartItemId?: string | null;
+  } | null;
 }
 
 // --- Deep-dive insights (fetched lazily, one endpoint call per card) -------

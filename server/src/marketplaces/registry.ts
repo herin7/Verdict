@@ -104,8 +104,9 @@ const IN_MARKETPLACES: Marketplace[] = [
   { id: "ajio", name: "AJIO", domains: ["ajio.com"], categories: ["fashion"], kind: "marketplace", packageHints: ["ajio"] },
   { id: "nykaa", name: "Nykaa", domains: ["nykaa.com", "nykaafashion.com"], categories: ["beauty", "fashion"], kind: "marketplace", packageHints: ["nykaa"] },
   { id: "tata_1mg", name: "Tata 1mg", domains: ["1mg.com"], categories: ["pharmacy"], kind: "marketplace", packageHints: ["tata1mg", "1mg"] },
-  // Blinkit has a real web catalog (blinkit.com) but blocks datacenter IPs
-  // aggressively - only Firecrawl's enhanced/residential proxy reliably gets in.
+  // Blinkit has a public catalog, but live tests could not bind anonymous page
+  // prices to a verified delivery location. Showing those as current offers is
+  // worse than omitting them.
   //
   // pincodeActions intentionally NOT set here yet: live verification against
   // blinkit.com found the location-bar trigger
@@ -122,9 +123,10 @@ const IN_MARKETPLACES: Marketplace[] = [
     domains: ["blinkit.com"],
     categories: ["grocery"],
     kind: "quick_commerce",
-    capability: "scrape",
+    capability: "deeplinkOnly",
     antiBotStealth: true,
     locationAware: true,
+    searchUrl: (q) => `https://blinkit.com/s/?q=${encodeURIComponent(q)}`,
     packageHints: ["blinkit", "grofers"],
   },
   // Zepto's web app (zeptonow.com) is a session-gated SPA: pricing comes from a
@@ -142,16 +144,17 @@ const IN_MARKETPLACES: Marketplace[] = [
     searchUrl: (q) => `https://www.zepto.com/search?query=${encodeURIComponent(q)}`,
     packageHints: ["zepto"],
   },
-  // BigBasket's catalog is JS-heavy but has no aggressive anti-bot/IP blocking
-  // reported - basic Firecrawl scrape + extract works.
+  // BigBasket pages expose catalog data, but anonymous prices are location
+  // dependent and live tests could not verify the delivery pincode.
   {
     id: "bigbasket",
     name: "BigBasket",
     domains: ["bigbasket.com"],
     categories: ["grocery"],
     kind: "quick_commerce",
-    capability: "scrape",
+    capability: "deeplinkOnly",
     locationAware: true,
+    searchUrl: (q) => `https://www.bigbasket.com/ps/?q=${encodeURIComponent(q)}`,
     packageHints: ["bigbasket"],
   },
   // Milkbasket is a subscription grocery app with no public web catalog - even

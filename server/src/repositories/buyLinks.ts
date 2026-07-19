@@ -2,9 +2,10 @@ import { and, eq, gt } from "drizzle-orm";
 import { getDb, withDbRetry } from "../db/client.js";
 import { buyLinks } from "../db/schema.js";
 import { config } from "../config.js";
-import type { BuyLink } from "../buylinks.js";
+import { sanitizeBuyLinks, type BuyLink } from "../buylinks.js";
+import { normalizeCountry } from "../marketplaces/registry.js";
 
-export async function getFreshBuyLinks(productId: string): Promise<BuyLink[] | null> {
+export async function getFreshBuyLinks(productId: string, country: string = "IN"): Promise<BuyLink[] | null> {
   const db = getDb();
   const rows = await withDbRetry(() =>
     db
@@ -14,15 +15,16 @@ export async function getFreshBuyLinks(productId: string): Promise<BuyLink[] | n
       .limit(1)
   );
   if (!rows[0]) return null;
-  return rows[0].links as BuyLink[];
+  return sanitizeBuyLinks(rows[0].links, normalizeCountry(country));
 }
 
 export async function upsertBuyLinks(productId: string, links: BuyLink[]) {
   const db = getDb();
   const expiresAt = new Date(Date.now() + config.buyLinkTtlHours * 60 * 60 * 1000);
+  const sanitized = sanitizeBuyLinks(links);
   const values = {
     productId,
-    links,
+    links: sanitized,
     expiresAt,
     createdAt: new Date(),
   };

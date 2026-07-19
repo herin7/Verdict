@@ -34,7 +34,8 @@ export async function identifyScreenRoute(app: FastifyInstance) {
       try {
         const country = normalizeCountry(parsed.data.country);
         const raw = validateScreenText(parsed.data.text);
-        const { cleaned, asin, priceHint, hasBuyBox, hasBreadcrumb } = cleanScreenText(raw, country);
+        const { cleaned, asin, fsn, flipkartItemId, priceHint, hasBuyBox, hasBreadcrumb } =
+          cleanScreenText(raw, country);
         req.log.info(
           {
             requestId: req.id,
@@ -43,6 +44,7 @@ export async function identifyScreenRoute(app: FastifyInstance) {
             rawLen: raw.length,
             cleanLen: cleaned.length,
             hasAsin: Boolean(asin),
+            hasFsn: Boolean(fsn || flipkartItemId),
             hasPriceHint: Boolean(priceHint),
             hasBuyBox,
             hasBreadcrumb,
@@ -57,6 +59,12 @@ export async function identifyScreenRoute(app: FastifyInstance) {
           hasBuyBox,
           hasBreadcrumb,
         });
+        if (!product.name?.trim()) {
+          return reply.code(422).send({
+            error: "Couldn’t read the product name",
+            code: "product_identity_incomplete",
+          });
+        }
         if (product.confidence < MIN_IDENTIFY_CONFIDENCE) {
           req.log.warn(
             {
@@ -84,8 +92,21 @@ export async function identifyScreenRoute(app: FastifyInstance) {
         // re-scraped "competing" offer is actually the same listing.
         const sourceMarketplaceId = marketplaceIdForPackage(parsed.data.packageName, country);
         const referencePrice = toReferencePrice(priceHint, null, sourceMarketplaceId, currencyFor(country));
-        return { product, country, referencePrice };
+        return {
+          product,
+          country,
+          referencePrice,
+          asin,
+          fsn,
+          flipkartItemId,
+        };
       } catch (err) {
+        if ((err as Error & { code?: string }).code === "product_identity_incomplete") {
+          return reply.code(422).send({
+            error: "Couldn’t read the product name",
+            code: "product_identity_incomplete",
+          });
+        }
         if (err instanceof ValidationError) {
           req.log.info(
             {

@@ -61,7 +61,7 @@ export function recordProviderCall(metric: ProviderCallMetric): void {
 }
 
 function chainFor(workload: Workload): LLMProvider[] {
-  const names = config.aiPolicy[workload] ?? ["anthropic"];
+  const names = config.aiPolicy[workload] ?? ["bedrock-mantle"];
   return names.map((n) => PROVIDERS[n]).filter((p): p is LLMProvider => Boolean(p));
 }
 

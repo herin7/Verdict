@@ -16,6 +16,7 @@ import {
   Stagger,
   Surface,
 } from "../components/ui";
+import { RetailerMark } from "../components/RetailerMark";
 import { colors, font, fonts, iconSize, space } from "../theme";
 import { track } from "../analytics/posthog";
 import {
@@ -204,10 +205,9 @@ export function MissionsScreen({ onBack }: { onBack: () => void }) {
           }
           renderItem={({ item: link }) => (
             <Tappable onPress={() => Linking.openURL(link.url)} style={styles.linkRow}>
-              <Text style={styles.linkText} numberOfLines={1}>
-                {link.retailer}
-                {link.price ? ` · ${link.price}` : ""}
-              </Text>
+              <RetailerMark retailerId={undefined} name={link.retailer} url={link.url} />
+              <View style={{ flex: 1 }} />
+              {link.price ? <Text style={styles.linkText}>{link.price}</Text> : null}
               <Ionicons name="open-outline" size={iconSize.sm} color={colors.accent} />
             </Tappable>
           )}

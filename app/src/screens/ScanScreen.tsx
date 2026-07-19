@@ -29,7 +29,18 @@ export function ScanScreen({
   initialImageBase64,
   initialScreenText,
 }: {
-  onReport: (r: ConsensusReport, p: ProductIdentity, buyLinks: BuyLink[], productId?: string | null) => void;
+  onReport: (
+    r: ConsensusReport,
+    p: ProductIdentity,
+    buyLinks: BuyLink[],
+    productId?: string | null,
+    referencePrice?: import("../types").ReferencePrice | null,
+    productIds?: {
+      asin?: string | null;
+      fsn?: string | null;
+      flipkartItemId?: string | null;
+    } | null
+  ) => void;
   onHome: () => void;
   initialUrl?: string | null;
   initialImageBase64?: string | null;
@@ -40,6 +51,12 @@ export function ScanScreen({
   const cameraRef = useRef<CameraView>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [product, setProduct] = useState<ProductIdentity | null>(null);
+  const [referencePrice, setReferencePrice] = useState<import("../types").ReferencePrice | null>(null);
+  const [productIds, setProductIds] = useState<{
+    asin?: string | null;
+    fsn?: string | null;
+    flipkartItemId?: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
@@ -100,8 +117,9 @@ export function ScanScreen({
         setError(null);
         setStage("identifying");
         try {
-          const { product: p } = await identifyUrl(initialUrl.trim());
+          const { product: p, referencePrice: ref } = await identifyUrl(initialUrl.trim());
           setProduct(p);
+          setReferencePrice(ref);
           setStage("confirm");
           setThumbStatus("loading");
           setProductImageUrl(null);
@@ -214,8 +232,13 @@ export function ScanScreen({
     goTo("identifying");
     track("scan_started", { method: "overlay" });
     try {
-      const { product: p } = await identifyScreen(payload.text, payload.packageName);
+      const { product: p, referencePrice: ref, asin, fsn, flipkartItemId } = await identifyScreen(
+        payload.text,
+        payload.packageName
+      );
       setProduct(p);
+      setReferencePrice(ref);
+      setProductIds({ asin, fsn, flipkartItemId });
       setCapturedUri(null);
       setCapturedBase64(null);
       goTo("confirm");
@@ -240,8 +263,9 @@ export function ScanScreen({
     goTo("identifying");
     track("scan_started", { method: "paste" });
     try {
-      const { product: p } = await identifyUrl(url.trim());
+      const { product: p, referencePrice: ref } = await identifyUrl(url.trim());
       setProduct(p);
+      setReferencePrice(ref);
       setCapturedUri(null);
       setCapturedBase64(null);
       goTo("confirm");
@@ -267,9 +291,10 @@ export function ScanScreen({
     setError(null);
     try {
       const { report, buyLinks, productId } = await research(product);
-      onReport(report, product, buyLinks, productId);
+      onReport(report, product, buyLinks, productId, referencePrice, productIds);
       goTo("idle");
       setProduct(null);
+      setReferencePrice(null);
       setCapturedBase64(null);
     } catch (e) {
       setError((e as Error).message);
@@ -441,12 +466,16 @@ export function ScanScreen({
               <ProductThumb category="generic" status="empty" imageUrl={null} fallbackUri={capturedUri} />
               <View style={styles.confirmTextWrap}>
                 <Text style={styles.productName} numberOfLines={2}>
-                  Couldn't identify this
+                  {error?.includes("product_identity") || error?.toLowerCase().includes("product name")
+                    ? "Couldn’t read the product name"
+                    : "Couldn't identify this"}
                 </Text>
                 <Text style={styles.productMeta} numberOfLines={2}>
-                  {screenTextForRetry
-                    ? "Same screen text is ready - try again, or go back."
-                    : "Same photo is still ready to go - try again, or retake."}
+                  {error?.includes("product_identity")
+                    ? "Try again, or search manually from home."
+                    : screenTextForRetry
+                      ? "Same screen text is ready - try again, or go back."
+                      : "Same photo is still ready to go - try again, or retake."}
                 </Text>
               </View>
             </View>

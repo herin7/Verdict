@@ -326,9 +326,20 @@ class VerdictAccessibilityService : AccessibilityService() {
 
   private fun addToken(out: LinkedHashSet<String>, raw: String?) {
     val t = raw?.trim() ?: return
+    // Keep lone currency markers so server can rejoin with sibling amounts
+    // ("₹" + "29,990"). length<2 used to drop ₹ and kill priceHint.
+    if (t.matches(Regex("""^(₹|Rs\.?|INR|\$|USD)$""", RegexOption.IGNORE_CASE))) {
+      out.add(t)
+      return
+    }
     if (t.length < 2 || t.length > 300) return
     val lower = t.lowercase()
     if (CHROME.any { lower.startsWith(it) || lower == it }) return
+    // Keep Indian/western grouped bare prices (comma amounts)
+    if (t.matches(Regex("""^\d{1,3}(,\d{2,3})+(\.\d{1,2})?$"""))) {
+      out.add(t)
+      return
+    }
     if (t.length <= 4 && t.matches(Regex("""^\d+(\.\d+)?$"""))) return
     out.add(t)
   }

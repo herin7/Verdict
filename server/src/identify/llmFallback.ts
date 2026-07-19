@@ -1,13 +1,7 @@
 import { runWorkload } from "../ai/gateway.js";
 import type { LLMMessage, ToolSpec } from "../ai/types.js";
-import { ProductIdentitySchema, type ProductIdentity } from "../schema.js";
+import { ProductIdentitySchema, requireProductIdentity, type ProductIdentity } from "../schema.js";
 
-/**
- * Below this, a schema-valid confidence is accepted as-is even with strong
- * evidence present - retrying is only worth it when the model landed just
- * under the "this is clearly a PDP" bar MIN_IDENTIFY_CONFIDENCE (0.45) relies
- * on for the caller-facing accept/reject decision.
- */
 const STRONG_SIGNAL_CONFIDENCE_FLOOR = 0.7;
 
 const PRODUCT_TOOL: ToolSpec = {
@@ -35,16 +29,15 @@ const PRODUCT_TOOL: ToolSpec = {
 };
 
 function normalizeProductIdentity(raw: unknown): unknown {
-  return { brand: null, model: null, ...(raw as Record<string, unknown>) };
+  const o = { brand: null, model: null, ...(raw as Record<string, unknown>) } as Record<string, unknown>;
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  const search = typeof o.searchTerm === "string" ? o.searchTerm.trim() : "";
+  if (!name && search) o.name = search;
+  if (!search && name) o.searchTerm = name;
+  if (typeof o.category !== "string" || !o.category.trim()) o.category = "general";
+  return o;
 }
 
-/**
- * Screen-text identify's retryHint: a schema-valid result is still spent one
- * more attempt on if the model was under-confident despite concrete PDP
- * evidence (ASIN / buy box / breadcrumb / price) already detected by
- * screenText.ts. Exported so the decision logic is unit-testable without
- * a real LLM call.
- */
 export function buildScreenTextRetryHint(ctx: {
   asin?: string | null;
   priceHint?: string | null;
@@ -52,8 +45,10 @@ export function buildScreenTextRetryHint(ctx: {
   hasBreadcrumb?: boolean;
 }): (data: ProductIdentity) => string | null {
   return (data: ProductIdentity): string | null => {
+    if (!data.name || !data.name.trim()) {
+      return "Product name was empty. Call report_product again with the on-screen title as name and a non-empty searchTerm.";
+    }
     if (data.confidence >= STRONG_SIGNAL_CONFIDENCE_FLOOR) return null;
-    if (!data.name || !data.name.trim()) return null;
 
     const evidence = [
       ctx.asin ? `an ASIN (${ctx.asin})` : null,
@@ -71,7 +66,6 @@ export function buildScreenTextRetryHint(ctx: {
   };
 }
 
-/** Lightweight text-only identify when URL metadata is incomplete. */
 export async function callToolIdentifyFromText(ctx: {
   url: string;
   title: string | null;
@@ -110,6 +104,7 @@ export async function callToolIdentifyFromText(ctx: {
     ctx.markdownSnippet ? `Page excerpt:\n${ctx.markdownSnippet.slice(0, 2500)}` : null,
     "Identify the commercial product so it can be researched for a buying decision.",
     "A title present together with a GTIN/SKU or brand is strong evidence of a real product page - reflect that with confidence >=0.7.",
+    "Never return an empty name or searchTerm.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -117,8 +112,10 @@ export async function callToolIdentifyFromText(ctx: {
   const messages: LLMMessage[] = [{ role: "user", content: prompt }];
 
   const retryHint = (data: ProductIdentity): string | null => {
+    if (!data.name || !data.name.trim()) {
+      return "Product name was empty. Call report_product with a nonempty name from the page title.";
+    }
     if (data.confidence >= STRONG_SIGNAL_CONFIDENCE_FLOOR) return null;
-    if (!data.name || !data.name.trim()) return null;
     if (!ctx.gtin && !ctx.brand) return null;
     const evidence = [ctx.gtin ? `a GTIN (${ctx.gtin})` : null, ctx.brand ? `a brand (${ctx.brand})` : null]
       .filter((x): x is string => Boolean(x))
@@ -136,10 +133,9 @@ export async function callToolIdentifyFromText(ctx: {
     normalize: normalizeProductIdentity,
     retryHint,
   });
-  return result.data;
+  return requireProductIdentity(result.data);
 }
 
-/** Identify a product from raw accessibility-extracted screen text (no URL). */
 export async function callToolIdentifyFromScreenText(ctx: {
   text: string;
   packageName: string;
@@ -176,6 +172,7 @@ export async function callToolIdentifyFromScreenText(ctx: {
     "- Strong PDP evidence - an ASIN, a Buy Now/Add to Cart button, a price next to a title, or a category breadcrumb - combined with a clear title means confidence MUST be >= 0.7.",
     "- Only set confidence < 0.45 for home feeds, category grids, or search result lists with many products and none of that evidence.",
     "- Never invent a product that is not supported by the text.",
+    "- Never return an empty name or searchTerm.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -192,5 +189,5 @@ export async function callToolIdentifyFromScreenText(ctx: {
     normalize: normalizeProductIdentity,
     retryHint: buildScreenTextRetryHint(ctx),
   });
-  return result.data;
+  return requireProductIdentity(result.data);
 }

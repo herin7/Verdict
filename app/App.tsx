@@ -381,7 +381,9 @@ function AppInner() {
     report: ConsensusReport,
     product: ProductIdentity,
     buyLinks: BuyLink[],
-    productId?: string | null
+    productId?: string | null,
+    referencePrice?: import("./src/types").ReferencePrice | null,
+    productIds?: SavedReport["productIds"]
   ) {
     const entry: SavedReport = {
       id: makeReportId(),
@@ -390,6 +392,8 @@ function AppInner() {
       report,
       buyLinks,
       productId: productId ?? null,
+      referencePrice: referencePrice ?? null,
+      productIds: productIds ?? null,
     };
     setCurrent(entry);
     setIsSaved(false);
@@ -528,6 +532,8 @@ function AppInner() {
             isSaved={isSaved}
             onBack={backFromReport}
             onToggleSave={handleToggleSave}
+            referencePrice={current.referencePrice}
+            productIds={current.productIds}
           />
         )}
 
@@ -535,9 +541,9 @@ function AppInner() {
           <ScanScreen
             initialUrl={shareUrl}
             initialScreenText={screenText}
-            onReport={(report, product, buyLinks, productId) => {
+            onReport={(report, product, buyLinks, productId, referencePrice, productIds) => {
               clearScanInputs();
-              openReport(report, product, buyLinks, productId);
+              openReport(report, product, buyLinks, productId, referencePrice, productIds);
             }}
             onHome={() => {
               clearScanInputs();

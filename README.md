@@ -1,144 +1,201 @@
 # Verdict
 
-Point your phone camera at any product and get a single AI research report on what the internet actually thinks - verdict, pros, complaints, long-term issues, fake-review signal, price advice, and alternatives. "Perplexity for purchase decisions."
+Verdict helps you decide whether a product is worth buying.
 
-Every fact in the report is grounded in a web search + scraping pipeline—it is not a thin wrapper around an LLM. Claude only fills two gaps: turning a camera photo into a product identity, and reasoning across scraped sources into one consensus.
+Open a product in a shopping app, scan it with the camera, or share a product link. Verdict identifies the item, researches real sources, compares prices, and returns one practical report with pros, complaints, risks, price advice, and alternatives.
 
-## How it works
+The app is built for honest results. It does not invent prices, treat MRP as the deal price, or show a marketplace when the product was not found there.
+
+## What is inside
 
 ```text
-Camera photo
-  -> Claude vision                 -> product identity
-  -> Firecrawl Search (parallel, source-scoped):
-       reddit / amazon / flipkart / youtube / blogs+forums / news / official site / price history
-  -> Firecrawl batch scrape (submit + poll -> markdown per source)
-  -> Claude synthesis              -> structured ConsensusReport
+Android app or shared link
+  -> identify product
+  -> read current listing price
+  -> research sources in parallel
+  -> compare marketplace offers
+  -> generate a structured buying report
 ```
 
-Every scan runs 8 parallel Firecrawl `Search` calls (one per source type), then a Firecrawl batch scrape job against the best ~8 citations found. The batch scrape is asynchronous—the server submits the batch and polls for completion (2s interval) until the scrape finishes or a timeout budget is hit, then falls back to search snippets for any source that didn't finish in time.
+The repository has two main parts:
 
-## Firecrawl
+- `app/` contains the Expo and React Native app.
+- `server/` contains the Fastify API, research pipeline, price normalization, database access, and AI gateway.
 
-Firecrawl is the web-data engine behind every report — the search + scraping pipeline is Firecrawl end to end, not a thin LLM wrapper.
+Android also includes two local Expo modules:
 
-- **Search** — each scan fans out 8 parallel Firecrawl `Search` calls, one per source type (reddit / amazon / flipkart / youtube / blogs+forums / news / official site / price history), returning ranked results plus snippets.
-- **Scrape** — the best ~8 citations go to a Firecrawl batch scrape job (submit + poll, 2s interval) that returns clean markdown per source. Async by design: partial results fall back to search snippets when a source misses the timeout budget.
-- **Monitors** — optional price/stock tracking uses Firecrawl `/monitor` when `FIRECRAWL_API_KEY` is set. Change events arrive via webhook at `POST /webhooks/firecrawl`, secured with `FIRECRAWL_WEBHOOK_SECRET` (header `x-verdict-webhook-secret`) and `PUBLIC_BASE_URL`.
-- **Soft-disabled by default** — no `FIRECRAWL_API_KEY` means monitors stay off and the server degrades to search-only; zero behavior change.
+- `verdict-accessibility` reads product text from supported shopping apps.
+- `verdict-overlay` shows the floating bubble and native draggable result panel.
 
-## Structure
+## Product identification
 
-- `server/` - Fastify + TypeScript backend. Holds the API keys and orchestrates the pipeline.
-  - Endpoints: `POST /identify`, `POST /identify-url`, `POST /research`, `POST /compare`, `POST /deals`, `GET|POST /missions*`, `POST /webhooks/firecrawl`, `GET/PUT /me/*`, `GET /health`
-  - Search-first provider orchestrator with Firecrawl gap-fill + optional Firecrawl price/stock monitors
-  - Shopping Missions (agent proposes, human approves — never auto-purchase)
-  - Compare Everywhere + Personalized Deal Engine (deterministic, no LLM)
-  - Pre-flight validation + abuse prevention (IP ban after repeated invalids)
-- `app/` - Expo (React Native, TS) app with camera scan, paste-link, payment profile, compare/deals UI, missions
-  - Android floating overlay (custom native module) + share-intent (requires EAS/dev-client build)
+Verdict accepts three entry points:
 
-## AI provider architecture
+1. Camera or image scan through `POST /identify`
+2. Product URL through `POST /identify-url`
+3. Android screen text through `POST /identify-screen`
 
-All LLM calls (`server/src/claude.ts`) go through one gateway (`server/src/ai/gateway.ts`) instead of talking to Anthropic directly. Each workload (`identify_image`, `report`, `insight_*`, etc.) resolves an ordered provider chain and tries each until one succeeds.
+Screen identification extracts useful marketplace IDs such as Amazon ASIN and Flipkart FSN when they are visible. It also captures the live price shown to the user. This live price is the strongest source for the current listing.
 
-- `AI_POLICY` (JSON env, e.g. `{"identify_screen":["bedrock","anthropic"]}`) sets the per-workload chain. Unset today = every workload is `["anthropic"]` only - zero behavior change.
-- `BEDROCK_REGION` enables the Bedrock provider (unset = Bedrock disabled entirely, chain falls through to Anthropic).
-- `BEDROCK_MODEL_MAP` (JSON env, e.g. `{"identify_screen":"amazon.nova-lite-v1:0"}`) maps workload -> Bedrock model id. A workload with no entry can't run on Bedrock even if listed in `AI_POLICY`.
+## Research pipeline
 
-Anthropic is always the default and last-resort fallback; Bedrock is opt-in per workload. To try Bedrock on one workload: set `BEDROCK_REGION`, add that workload to `BEDROCK_MODEL_MAP`, then add `["bedrock","anthropic"]` for it in `AI_POLICY`. Rollback is deleting/editing that env var, no code change.
+Research starts with source-specific searches for reviews, forums, videos, news, retailers, and price information. Useful pages are scraped and converted into clean source material. If a page blocks scraping or times out, Verdict keeps any trustworthy search evidence instead of failing the whole report.
 
-## Observability & Analytics
+The report is validated against a Zod schema before it reaches the app. Missing soft fields receive safe defaults such as `unknown`. Required product identity and evidence still remain strict.
 
-Product analytics (PostHog) and structured logging (pino) are both opt-in and fully disabled by default - unset env vars means zero behavior change.
+## Price and offer pipeline
 
-- Server: `POSTHOG_API_KEY` + `POSTHOG_HOST` (default `https://us.i.posthog.com`). Unset key = client never initializes, `capture()` calls no-op.
-- App: `EXPO_PUBLIC_POSTHOG_API_KEY` + `EXPO_PUBLIC_POSTHOG_HOST`. Unset key = `posthog` is `null`, `track()` calls no-op. No `PostHogProvider`/autocapture - events are only sent from explicit `track()` calls.
-- Every request logs `request_start`/`request_end` (pino, `server/src/logging/logger.ts`) keyed by `requestId`, with route, status, and `latencyMs`.
-- Event naming convention: `domain_action` in snake_case (e.g. `scan_started`, `report_saved`, `ai_provider_call`, `mission_created`). Only send category/count/boolean/enum-level properties - never raw product titles, scraped/screen text, prompts, images, tokens, or secrets.
+Price comparison uses several layers:
 
-## Reliability knobs
+1. Current on-device listing price
+2. Direct Amazon.in or Flipkart product page by ASIN, FSN, item ID, or URL
+3. Public JSON-LD and explicit payable-price fields
+4. Marketplace search results with validated price evidence
+5. Direct parsing of matching search result pages
+6. Firecrawl extraction for remaining gaps
 
-Optional env (defaults are fine for local/dev):
+Every price carries source context through normalization. Only current or sale prices are payable. MRP, EMI amounts, coupons, ratings, and review counts are rejected as deal prices.
 
-- `PROVIDER_HTTP_TIMEOUT_MS` (default `20000`) - AbortSignal wall-clock on search/scraping providers
-- `PROVIDER_HTTP_RETRIES` (default `2`) - extra attempts on `429`/`5xx`/network/timeout
-- `ANTHROPIC_TIMEOUT_MS` (default `90000`) - Anthropic SDK request timeout
+Other rules:
 
-`GET /health` reports config flags plus `dbReachable` (live `SELECT 1` when `DATABASE_URL` is set). Returns `503` if the DB is configured but unreachable. Firecrawl, Missions, and PostHog remain soft-disabled when their respective keys or flags are unset.
+- Sale price wins over MRP.
+- Out-of-stock products remain visible when a verified price exists.
+- Missing products and unpriced marketplace shells are omitted.
+- Available offers sort before out-of-stock offers.
+- Grocery pack sizes must match. A 250 ml item does not compare with a 750 ml item.
+- Location-sensitive results do not use the normal global cache.
 
-## Shopping Missions & Firecrawl monitors
+The manual live smoke script is at `server/scripts/live-price-smoke.ts`. It is never run by CI.
 
-Missions let the agent research compare/deals and propose an action; you approve or reject. No purchase runs without approval.
+## Quick commerce
 
-- Requires `DATABASE_URL` (apply `server/drizzle/0002_missions_firecrawl.sql`). Set `MISSIONS_ENABLED=false` to force-disable.
-- Optional price/stock monitoring uses Firecrawl `/monitor` when `FIRECRAWL_API_KEY` is set. Register webhooks with `PUBLIC_BASE_URL` + `FIRECRAWL_WEBHOOK_SECRET` (header `x-verdict-webhook-secret`).
-- App: Dashboard → Shopping Missions.
-- Server: `GET /missions`, `POST /missions`, `POST /missions/:id/run|approve|reject|cancel`.
+Quick-commerce prices depend on the delivery location and dark store.
 
-## Run
+Verdict trusts the price read from the shopping app currently open on the user's device. Anonymous Blinkit, Zepto, BigBasket, Instamart, Milkbasket, and Flipkart Minutes pages are not treated as current cross-store offers unless the delivery location can be verified.
 
-### Backend
+The user can save an Indian delivery pincode in the profile. Marketplace scraping only uses pincode actions where the selectors were verified. Unknown or unverified location flows are skipped rather than guessed.
+
+## AI gateway
+
+All AI workloads pass through `server/src/ai/gateway.ts`.
+
+The default provider is AWS Bedrock Mantle with `zai.glm-5`. Anthropic is not part of the default chain.
+
+Required configuration:
+
+```env
+BEDROCK_REGION=ap-south-1
+BEDROCK_MANTLE_API_KEY=your_key
+```
+
+`AI_POLICY` can override the provider chain per workload. `BEDROCK_MODEL_MAP` can override model IDs. GLM does not support image input, so `identify_image` needs a vision-capable Bedrock model if camera identification is enabled.
+
+## Database
+
+Verdict uses Postgres through Drizzle and the Neon serverless driver.
+
+Migrations cover:
+
+- Core users, products, reports, and offers
+- Compare and deal guardrails
+- Shopping missions and Firecrawl monitors
+- Report currency
+- User delivery pincode
+
+Apply them with:
 
 ```bash
 cd server
-cp .env.example .env
-# Fill your API keys
+npm run db:migrate
+```
+
+## Shopping missions
+
+Missions can research products, compare offers, and propose an action. The user must approve every action. Verdict never purchases automatically.
+
+Missions require `DATABASE_URL`. Firecrawl monitors are optional and need `FIRECRAWL_API_KEY`, `PUBLIC_BASE_URL`, and `FIRECRAWL_WEBHOOK_SECRET`.
+
+Set `MISSIONS_ENABLED=false` to disable missions.
+
+## Main API routes
+
+- `POST /identify`
+- `POST /identify-url`
+- `POST /identify-screen`
+- `POST /research`
+- `POST /compare`
+- `POST /compare/start`
+- `GET /compare/poll/:jobId`
+- `POST /deals`
+- `GET|POST /missions`
+- `POST /missions/:id/run|approve|reject|cancel`
+- `GET|PUT /me/*`
+- `POST /webhooks/firecrawl`
+- `GET /health`
+
+Protected routes use Supabase JWT authentication. Request validation, abuse guards, structured logs, and provider metrics live on the server.
+
+## Local setup
+
+### Server
+
+```bash
+cd server
+copy .env.example .env
 npm install
+npm run db:migrate
 npm run dev
-
-# Optional:
-# Apply drizzle/0001_guardrails_compare_deals.sql on Neon
 ```
 
-### App (Expo Go)
+Fill `DATABASE_URL`, Supabase settings, Bedrock settings, and any optional Firecrawl or PostHog values in `.env`.
+
+### Android app
 
 ```bash
 cd app
+copy .env.example .env
 npm install
-npm start
-```
-
-### App (Android floating overlay / share target)
-
-```bash
-cd app
 npx expo prebuild --platform android
 npx expo run:android
-
-# or
-eas build --profile development --platform android
 ```
 
-On a physical device set:
+For a physical phone, point `EXPO_PUBLIC_API_URL` at the computer's LAN address:
 
 ```env
 EXPO_PUBLIC_API_URL=http://192.168.1.50:8787
 ```
 
-Replace the IP with your machine's LAN address. Android Emulator automatically uses `10.0.2.2`.
+The Android emulator uses `10.0.2.2` to reach the host.
 
-## Overlay detection priority (Android)
+Expo Go is not enough for the overlay, accessibility service, share target, or native launcher icon. Use a development build.
 
-1. Accessibility reading (watchlist-gated shopping apps only) — auto-shows bubble, no casting
-2. Bubble tap → identify from on-screen text via `/identify-screen` (no MediaProjection)
-3. Share Intent from shopping app (zero extra permission)
+## Android permissions
 
-Personal apps are never read.
+Verdict needs:
 
-Requires:
-- Accessibility permission
-- Display over other apps permission
+- Camera
+- Display over other apps
+- Accessibility service
+- Notifications
+- Approximate location for location-aware pricing
 
-iOS floating overlays are not supported by Apple and are deferred.
+Accessibility reading is limited to supported shopping apps. Personal apps are not read. iOS does not support Android-style floating overlays.
 
-## Credit cost per scan
+## Tests
 
-~8 searches (3 credits each) + up to 8 scrapes (1 credit each) = **~32 credits per scan**.
+```bash
+cd server
+npm test
+npm run typecheck
 
-## Timing
+cd ../app
+npx tsc --noEmit
+```
 
-Real-world latency depends on scrape speed for the selected sources plus Claude synthesis. The pipeline budgets approximately:
+Focused server scripts are also available for compare, pricing evidence, direct fetchers, screen text, AI gateway, and pack matching.
 
-- ~9 seconds for search
-- ~15 seconds for scraping
-- Graceful degradation to search snippets if scraping exceeds the timeout budget
+## Optional observability
+
+PostHog is disabled when its key is absent. Server logs use pino and include request IDs, routes, status codes, latency, provider calls, and outcomes.
+
+Keep analytics properties coarse. Never send raw screen text, product images, prompts, tokens, or secrets.

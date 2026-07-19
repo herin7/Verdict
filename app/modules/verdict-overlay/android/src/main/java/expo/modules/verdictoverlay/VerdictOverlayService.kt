@@ -22,6 +22,7 @@ import android.provider.Settings
 import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -50,7 +51,7 @@ class VerdictOverlayService : Service() {
     // default while still leaving room to drag it larger. Bounds keep it from
     // ever collapsing to nothing or eating the whole screen (some of the
     // shopping app underneath should always stay visible/reachable).
-    const val PANEL_MIN_HEIGHT_FRACTION = 0.32
+    const val PANEL_MIN_HEIGHT_FRACTION = 0.24
     const val PANEL_MAX_HEIGHT_FRACTION = 0.88
     const val PANEL_DEFAULT_HEIGHT_FRACTION = 0.56
 
@@ -68,10 +69,8 @@ class VerdictOverlayService : Service() {
     }
 
     /**
-     * Live-resizes the already-open panel window. Called at drag-gesture
-     * frequency from JS (see ProductPanelScreen's handle). Coalesced to one
-     * Choreographer frame so WindowManager is not updated dozens of times
-     * per frame during a finger drag.
+     * Kept for diagnostics only. Live drag is fully native (drag strip).
+     * JS must not call this during gesture.
      */
     @JvmStatic
     fun resizePanel(fraction: Double) {
@@ -81,10 +80,13 @@ class VerdictOverlayService : Service() {
       svc.schedulePanelResizeFrame()
     }
 
-    /** Animate to a snap fraction after finger release. */
     @JvmStatic
     fun snapPanel(fraction: Double) {
       val svc = instance ?: return
+      if (fraction <= 0.01) {
+        svc.mainHandler.post { svc.hidePanel() }
+        return
+      }
       svc.pendingPanelFraction = fraction
       svc.pendingPanelAnimate = true
       svc.schedulePanelResizeFrame()
@@ -170,6 +172,15 @@ class VerdictOverlayService : Service() {
   private var panelView: View? = null
   private var panelSurface: ReactSurface? = null
   private var panelLayoutParams: WindowManager.LayoutParams? = null
+  private var panelDragStartY = 0f
+  private var panelDragStartFraction = PANEL_DEFAULT_HEIGHT_FRACTION
+  private var panelVelocityTracker: VelocityTracker? = null
+  private var panelDragLiveFraction = PANEL_DEFAULT_HEIGHT_FRACTION
+  private var panelDragPosted = false
+  private val panelDragCallback = Choreographer.FrameCallback {
+    panelDragPosted = false
+    applyPanelHeightImmediate(panelDragLiveFraction, animate = false)
+  }
 
   /**
    * Safety net: a WindowManager overlay window is not an Activity, so it has
@@ -612,39 +623,114 @@ class VerdictOverlayService : Service() {
       WindowManager.LayoutParams.MATCH_PARENT,
       height,
       type,
-      // FLAG_NOT_FOCUSABLE alone is documented to also imply
-      // FLAG_NOT_TOUCH_MODAL, but every real overlay-window sample sets
-      // both explicitly - being explicit here costs nothing and removes
-      // any doubt that touches outside this window's own rect reach
-      // whatever is behind it.
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
       PixelFormat.TRANSLUCENT
     ).apply {
       gravity = Gravity.BOTTOM
     }
 
+    val root = FrameLayout(this)
+    (view.parent as? android.view.ViewGroup)?.removeView(view)
+    root.addView(
+      view,
+      FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.MATCH_PARENT,
+        FrameLayout.LayoutParams.MATCH_PARENT
+      )
+    )
+
+    val stripH = (48f * dm.density).toInt()
+    val dragStrip = View(this).apply {
+      // Transparent hit target over the visible handle; content stays clickable below.
+      setBackgroundColor(Color.TRANSPARENT)
+      isClickable = true
+      setOnTouchListener { _, event -> handlePanelDrag(event) }
+    }
+    root.addView(
+      dragStrip,
+      FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, stripH, Gravity.TOP)
+    )
+
     try {
-      wm.addView(view, layoutParams)
+      wm.addView(root, layoutParams)
     } catch (e: Exception) {
-      // Surface is already started at this point - don't leak it running
-      // with no window and nothing tracking it.
       try { surface.stop() } catch (_: Exception) {}
       try { surface.detach() } catch (_: Exception) {}
       if (panelSurface === surface) panelSurface = null
       throw e
     }
-    panelView = view
+    panelView = root
     panelSurface = surface
     panelLayoutParams = layoutParams
+    panelDragLiveFraction = PANEL_DEFAULT_HEIGHT_FRACTION
+  }
+
+  private fun handlePanelDrag(event: MotionEvent): Boolean {
+    val screenH = resources.displayMetrics.heightPixels.toFloat().coerceAtLeast(1f)
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        panelHeightAnimator?.cancel()
+        panelHeightAnimator = null
+        val lp = panelLayoutParams
+        panelDragStartFraction =
+          if (lp != null) lp.height.toDouble() / screenH.toDouble() else PANEL_DEFAULT_HEIGHT_FRACTION
+        panelDragStartY = event.rawY
+        panelDragLiveFraction = panelDragStartFraction
+        panelVelocityTracker?.recycle()
+        panelVelocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+        return true
+      }
+      MotionEvent.ACTION_MOVE -> {
+        panelVelocityTracker?.addMovement(event)
+        val dy = event.rawY - panelDragStartY
+        // Finger down shrinks panel (bottom-anchored)
+        val next = PanelSnapPolicy.clampLive(panelDragStartFraction - dy / screenH)
+        panelDragLiveFraction = next
+        if (!panelDragPosted) {
+          panelDragPosted = true
+          Choreographer.getInstance().postFrameCallback(panelDragCallback)
+        }
+        return true
+      }
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+        panelVelocityTracker?.addMovement(event)
+        panelVelocityTracker?.computeCurrentVelocity(1000)
+        val vy = panelVelocityTracker?.yVelocity ?: 0f
+        panelVelocityTracker?.recycle()
+        panelVelocityTracker = null
+        val snap = PanelSnapPolicy.resolveSnap(
+          panelDragStartFraction,
+          panelDragLiveFraction,
+          vy,
+          dismissEnabled = true
+        )
+        if (snap <= 0.01) {
+          hidePanel()
+        } else {
+          applyPanelHeightImmediate(snap, animate = true)
+          panelDragLiveFraction = snap
+        }
+        return true
+      }
+    }
+    return false
   }
 
   /** Live-resizes the open panel window in place - see companion resizePanel(). */
   private fun applyPanelHeightImmediate(fraction: Double, animate: Boolean) {
+    if (fraction <= 0.01) {
+      hidePanel()
+      return
+    }
     val view = panelView ?: return
     val lp = panelLayoutParams ?: return
     val wm = windowManager ?: return
-    val clamped = fraction.coerceIn(PANEL_MIN_HEIGHT_FRACTION, PANEL_MAX_HEIGHT_FRACTION)
-    val newHeight = (resources.displayMetrics.heightPixels * clamped).toInt()
+    val target = if (animate) {
+      fraction.coerceIn(PanelSnapPolicy.PEEK, PanelSnapPolicy.EXPANDED)
+    } else {
+      PanelSnapPolicy.clampLive(fraction)
+    }
+    val newHeight = (resources.displayMetrics.heightPixels * target).toInt()
     if (lp.height == newHeight) return
 
     if (animate && motionEnabled()) {

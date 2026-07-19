@@ -6,19 +6,21 @@ import { Badge } from "./Badge";
 import { Card, EmptyState, LoadingState } from "./ui";
 import { LocationBanner } from "./LocationBanner";
 import { colors, fonts, radius, space } from "../theme";
-import { fetchDeals, pollCompareJob, startCompareJob } from "../api/client";
+import { fetchDeals, pollCompareJob, startCompareJob, type CompareIds } from "../api/client";
 import { getCountry, type Country } from "../country";
 import { openRetailer } from "../deeplink";
 import { track } from "../analytics/posthog";
 import { formatMoney } from "../format";
-import { filterOffersByCurrency, groupOffersByKind, retailerLogoUrl } from "../retailers";
-import { Favicon } from "./Icons";
+import { PriceText } from "./PriceText";
+import { RetailerMark } from "./RetailerMark";
+import { filterOffersByCurrency, filterPricedOffers, groupOffersByKind, sortOffersForDeals } from "../retailers";
 import type { MarketplaceOffer, ProductIdentity, RankedDeal, ReferencePrice } from "../types";
 
 export function CompareDealsSection({
   product,
   preloaded,
   referencePrice,
+  productIds,
 }: {
   product: ProductIdentity;
   /** Skip the internal compare/deals fetch when the caller already has results
@@ -29,6 +31,8 @@ export function CompareDealsSection({
    *  /compare and /deals so a same-platform re-scrape can never be shown as a
    *  "better deal" than what's already on screen. */
   referencePrice?: ReferencePrice | null;
+  /** ASIN / Flipkart FSN from identify-screen — enables direct product-page fetch. */
+  productIds?: CompareIds | null;
 }) {
   const [offers, setOffers] = useState<MarketplaceOffer[]>(preloaded?.offers ?? []);
   const [deals, setDeals] = useState<RankedDeal[]>(preloaded?.deals ?? []);
@@ -58,7 +62,7 @@ export function CompareDealsSection({
     setOffers([]);
     setDeals([]);
 
-    fetchDeals(product, undefined, referencePrice)
+    fetchDeals(product, undefined, referencePrice, productIds)
       .then((dealRes) => {
         if (alive) setDeals(dealRes?.deals ?? []);
       })
@@ -69,7 +73,7 @@ export function CompareDealsSection({
 
     (async () => {
       try {
-        const { jobId } = await startCompareJob(product, null, referencePrice);
+        const { jobId } = await startCompareJob(product, productIds ?? null, referencePrice);
         const poll = async () => {
           if (!alive) return;
           try {
@@ -107,14 +111,30 @@ export function CompareDealsSection({
       alive = false;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [product.name, product.searchTerm, preloaded]);
+  }, [
+    product.name,
+    product.searchTerm,
+    preloaded,
+    referencePrice?.amount,
+    referencePrice?.currency,
+    productIds?.asin,
+    productIds?.fsn,
+    productIds?.flipkartItemId,
+  ]);
 
   const currency = country === "US" ? "USD" : "INR";
-  // Hide (never relabel) any offer/deal whose currency doesn't match the
-  // user's own country - see filterOffersByCurrency for why.
-  const currencyOffers = useMemo(() => filterOffersByCurrency(offers, currency), [offers, currency]);
+  const currencyOffers = useMemo(
+    () => sortOffersForDeals(filterPricedOffers(filterOffersByCurrency(offers, currency))),
+    [offers, currency]
+  );
   const currencyDeals = useMemo(
-    () => deals.filter((d) => !d.offer.currency || d.offer.currency === currency),
+    () =>
+      deals.filter(
+        (d) =>
+          (!d.offer.currency || d.offer.currency === currency) &&
+          d.offer.price != null &&
+          !d.offer.checkManually
+      ),
     [deals, currency]
   );
   const grouped = useMemo(() => groupOffersByKind(currencyOffers, country), [currencyOffers, country]);
@@ -175,7 +195,13 @@ export function CompareDealsSection({
             style={styles.dealHero}
             accessibilityLabel={`${bestDeal.offer.retailer} best deal`}
           >
-            <Favicon url={retailerLogoUrl(bestDeal.offer.retailerId, bestDeal.offer.url)} size={22} />
+            <RetailerMark
+              retailerId={bestDeal.offer.retailerId}
+              name={bestDeal.offer.retailer}
+              url={bestDeal.offer.url}
+              showName={false}
+              size={22}
+            />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.dealRetailer}>{bestDeal.offer.retailer}</Text>
               <Text style={styles.dealTitle} numberOfLines={1}>
@@ -191,7 +217,7 @@ export function CompareDealsSection({
               {bestDeal.totalSavings > 0 && (
                 <Text style={styles.listStrike}>{formatMoney(bestDeal.listPrice, currency)}</Text>
               )}
-              <Text style={styles.finalPrice}>{formatMoney(bestDeal.finalPayable, currency)}</Text>
+              <PriceText amount={bestDeal.finalPayable} currency={currency} style={styles.finalPrice} />
               {bestDeal.totalSavings > 0 && (
                 <Badge label={`Save ${formatMoney(bestDeal.totalSavings, currency)}`} color={colors.buy} />
               )}
@@ -237,45 +263,38 @@ function OfferList({
         <Ionicons name="git-compare-outline" size={16} color={colors.accent} />
         <Text style={styles.title}>{title}</Text>
       </View>
-      {offers.slice(0, 6).map((o, i) => {
+      {offers.slice(0, 8).map((o, i) => {
         const deal = deals.find((d) => d.offer.url === o.url);
+        const oos = o.inStock === false;
         return (
           <Tappable
             key={`${o.url}-${i}`}
             onPress={() => {
-              track("marketplace_deeplink_opened", { platform: o.retailerId, manual: Boolean(o.checkManually) });
+              track("marketplace_deeplink_opened", { platform: o.retailerId, manual: false });
               openRetailer(o.url, o.retailerId);
             }}
-            style={[styles.row, i === 0 && styles.rowFirst]}
-            accessibilityLabel={`${o.retailer} price`}
+            style={[styles.row, i === 0 && styles.rowFirst, oos && styles.rowOos]}
+            accessibilityLabel={`${o.retailer} ${oos ? "out of stock" : "price"}`}
           >
-            <Favicon url={retailerLogoUrl(o.retailerId, o.url)} size={20} />
+            <RetailerMark retailerId={o.retailerId} name={o.retailer} url={o.url} showName={false} size={20} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.rowRetailer}>{o.retailer}</Text>
               <Text style={styles.rowTitle} numberOfLines={1}>
-                {o.checkManually ? "Live price not available" : o.title}
+                {o.title}
               </Text>
-              {!o.checkManually && o.inStock === false && <Text style={styles.oos}>Out of stock</Text>}
+              {oos && <Text style={styles.oos}>Out of stock</Text>}
             </View>
-            {o.checkManually ? (
-              <View style={styles.manualCol}>
-                <Ionicons name="open-outline" size={13} color={colors.textMuted} />
-                <Text style={styles.manualText}>Check manually</Text>
-              </View>
-            ) : (
-              <View style={styles.priceCol}>
-                {deal && deal.totalSavings > 0 ? (
-                  <>
-                    <Text style={styles.listStrike}>{formatMoney(deal.listPrice, currency)}</Text>
-                    <Text style={styles.rowPrice}>{formatMoney(deal.finalPayable, currency)}</Text>
-                  </>
-                ) : (
-                  <Text style={styles.rowPrice}>
-                    {o.price != null ? formatMoney(o.price, currency) : o.priceRaw ?? "—"}
-                  </Text>
-                )}
-              </View>
-            )}
+            <View style={styles.priceCol}>
+              {deal && deal.totalSavings > 0 ? (
+                <>
+                  <Text style={styles.listStrike}>{formatMoney(deal.listPrice, currency)}</Text>
+                  <PriceText amount={deal.finalPayable} currency={currency} style={styles.rowPrice} />
+                </>
+              ) : (
+                <PriceText amount={o.price} currency={currency} style={styles.rowPrice} />
+              )}
+              {oos && <Text style={styles.oosPriceNote}>listed</Text>}
+            </View>
           </Tappable>
         );
       })}
@@ -315,11 +334,11 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   rowFirst: { borderTopWidth: 0 },
+  rowOos: { opacity: 0.85 },
   rowRetailer: { fontFamily: fonts.sansSemiBold, fontSize: 13, color: colors.text },
   rowTitle: { fontFamily: fonts.sans, fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  oos: { fontFamily: fonts.sans, fontSize: 11, color: colors.avoid, marginTop: 2 },
+  oos: { fontFamily: fonts.sansSemiBold, fontSize: 11, color: colors.avoid, marginTop: 2 },
+  oosPriceNote: { fontFamily: fonts.sans, fontSize: 10, color: colors.textFaint, marginTop: 2 },
   priceCol: { alignItems: "flex-end" },
   rowPrice: { fontFamily: fonts.mono, fontSize: 14, color: colors.accent },
-  manualCol: { flexDirection: "row", alignItems: "center", gap: 4 },
-  manualText: { fontFamily: fonts.sansSemiBold, fontSize: 12, color: colors.textMuted },
 });
