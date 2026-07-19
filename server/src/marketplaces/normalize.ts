@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export interface MarketplaceOffer {
   retailer: string;
   retailerId: string;
@@ -24,6 +26,8 @@ export interface MarketplaceOffer {
    * now. Never eligible to be flagged as a "deal" (see deals/calculator.ts).
    */
   isCurrentListing?: boolean;
+  /** Optional confidence 0-1 when location/pincode was only approximate. */
+  priceConfidence?: number | null;
 }
 
 /**
@@ -40,18 +44,188 @@ export interface ReferencePrice {
   retailerId?: string | null;
 }
 
-const PRICE_NUM_RE = /([\d,]+(?:\.\d{1,2})?)/;
+export type SupportedCurrency = "INR" | "USD";
 
+export type ParsePriceResult = {
+  amount: number | null;
+  currency: SupportedCurrency;
+  reason?: string;
+};
+
+const CONTAMINATION_RE =
+  /\b(rating|ratings|review|reviews|star|stars|out\s+of\s+5|customers?|sold|orders?|emi|per\s+month|\/mo|coupon|cashback|off\b|%|percent)\b/i;
+
+const CURRENCY_MARKER_RE = /(?:₹|Rs\.?\s*|INR\b|\$|USD\b)/i;
+const PRICE_WITH_MARKER_RE =
+  /(?:₹|Rs\.?\s*|INR\b)\s*([\d,.]+)|(?:\$|USD\b)\s*([\d,.]+)|([\d,.]+)\s*(?:₹|Rs\.?|INR\b|\$|USD\b)/i;
+
+export const SupportedCurrencySchema = z.enum(["INR", "USD"]);
+
+export const ReferencePriceSchema = z.object({
+  amount: z.number().positive().finite(),
+  currency: SupportedCurrencySchema,
+  retailerId: z.string().nullable().optional(),
+});
+
+export const MarketplaceOfferSchema = z.object({
+  retailer: z.string().min(1),
+  retailerId: z.string().min(1),
+  url: z.string().min(1),
+  title: z.string(),
+  price: z.number().positive().finite().nullable(),
+  currency: SupportedCurrencySchema,
+  priceRaw: z.string().nullable(),
+  shipping: z.string().nullable(),
+  deliveryEstimate: z.string().nullable(),
+  inStock: z.boolean().nullable(),
+  seller: z.string().nullable(),
+  coupons: z.array(z.string()),
+  matchScore: z.number().min(0).max(1),
+  matchReason: z.string(),
+  checkManually: z.boolean().optional(),
+  isCurrentListing: z.boolean().optional(),
+  priceConfidence: z.number().min(0).max(1).nullable().optional(),
+});
+
+export const StructuredProductDataSchema = z
+  .object({
+    title: z.string().nullable().optional(),
+    brand: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+    price: z.union([z.string(), z.number()]).nullable().optional(),
+    currency: z.string().nullable().optional(),
+    originalPrice: z.union([z.string(), z.number()]).nullable().optional(),
+    gtin: z.string().nullable().optional(),
+    upc: z.string().nullable().optional(),
+    ean: z.string().nullable().optional(),
+    sku: z.string().nullable().optional(),
+    seller: z.string().nullable().optional(),
+    inStock: z.boolean().nullable().optional(),
+    imageUrl: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    variants: z
+      .array(
+        z.object({
+          title: z.string().nullable().optional(),
+          price: z.union([z.string(), z.number()]).nullable().optional(),
+          originalPrice: z.union([z.string(), z.number()]).nullable().optional(),
+          currency: z.string().nullable().optional(),
+          availability: z.string().nullable().optional(),
+          sku: z.string().nullable().optional(),
+          gtin: z.string().nullable().optional(),
+        })
+      )
+      .nullable()
+      .optional(),
+  })
+  .passthrough();
+
+export type StructuredProductData = z.infer<typeof StructuredProductDataSchema>;
+
+export function normalizeCurrencyCode(raw: string | null | undefined): SupportedCurrency | null {
+  if (!raw) return null;
+  const s = raw.trim().toUpperCase();
+  if (s === "INR" || s === "RS" || s === "RS." || s === "₹") return "INR";
+  if (s === "USD" || s === "$") return "USD";
+  if (/₹|RS\.?|INR/.test(s)) return "INR";
+  if (/\$|USD/.test(s)) return "USD";
+  return null;
+}
+
+function detectCurrencyFromText(raw: string): SupportedCurrency | null {
+  if (/₹|Rs\.?|INR/i.test(raw)) return "INR";
+  if (/\$|USD/i.test(raw)) return "USD";
+  return null;
+}
+
+/** Parse Indian/Western grouped numbers: 1,24,999 or 12,483.50 or 29999 */
+export function parseGroupedNumber(raw: string): number | null {
+  const cleaned = raw.trim().replace(/[^\d.,]/g, "");
+  if (!cleaned) return null;
+
+  // Indian lakh grouping: 1,24,999 or 12,34,567.89
+  if (/^\d{1,3}(,\d{2})+(,\d{3})?(\.\d{1,2})?$/.test(cleaned) || /^\d{1,2},\d{2},\d{3}(\.\d{1,2})?$/.test(cleaned)) {
+    const n = Number(cleaned.replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // Western: 12,483.50 or 12483
+  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(cleaned)) {
+    const n = Number(cleaned.replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // Plain digits / decimal without thousands separators
+  if (/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // Ambiguous European style 1.234,56 — reject rather than guess
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(cleaned)) return null;
+
+  // Last resort: strip commas only if no conflicting dots as thousands
+  const stripped = cleaned.replace(/,/g, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(stripped)) return null;
+  const n = Number(stripped);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Validated price parser. Ratings/reviews/EMI/coupon text never become prices.
+ * Bare numbers require allowBareNumeric + a validated defaultCurrency (structured extract path).
+ */
 export function parsePrice(
   raw: string | null | undefined,
-  defaultCurrency: string = "INR"
-): { amount: number | null; currency: string } {
-  if (!raw) return { amount: null, currency: defaultCurrency };
-  const currency = /\$|USD/i.test(raw) ? "USD" : /₹|Rs\.?|INR/i.test(raw) ? "INR" : defaultCurrency;
-  const m = raw.replace(/,/g, "").match(PRICE_NUM_RE);
-  if (!m) return { amount: null, currency };
-  const amount = Number(m[1]);
-  return { amount: Number.isFinite(amount) ? amount : null, currency };
+  defaultCurrency: string = "INR",
+  opts: { allowBareNumeric?: boolean; declaredCurrency?: string | null } = {}
+): ParsePriceResult {
+  const fallback = (normalizeCurrencyCode(defaultCurrency) ?? "INR") as SupportedCurrency;
+  if (raw == null) return { amount: null, currency: fallback, reason: "empty" };
+
+  const text = String(raw).trim();
+  if (!text) return { amount: null, currency: fallback, reason: "empty" };
+
+  if (CONTAMINATION_RE.test(text)) {
+    return { amount: null, currency: fallback, reason: "contamination" };
+  }
+
+  const markerCurrency = detectCurrencyFromText(text);
+  const declared = normalizeCurrencyCode(opts.declaredCurrency ?? null);
+
+  // Currency conflict: price text says $ but declared INR (or vice versa) — trust marker, else reject if both disagree with no marker
+  if (markerCurrency && declared && markerCurrency !== declared) {
+    // Prefer marker in the raw string; continue with markerCurrency
+  }
+
+  const hasMarker = CURRENCY_MARKER_RE.test(text);
+  if (!hasMarker && !opts.allowBareNumeric) {
+    return { amount: null, currency: declared ?? fallback, reason: "ambiguous_bare" };
+  }
+
+  let numRaw: string | null = null;
+  if (hasMarker) {
+    const m = text.match(PRICE_WITH_MARKER_RE);
+    numRaw = m?.[1] || m?.[2] || m?.[3] || null;
+  } else {
+    const m = text.match(/([\d,.]+)/);
+    numRaw = m?.[1] ?? null;
+  }
+  if (!numRaw) return { amount: null, currency: markerCurrency ?? declared ?? fallback, reason: "no_number" };
+
+  const amount = parseGroupedNumber(numRaw);
+  if (amount == null) return { amount: null, currency: markerCurrency ?? declared ?? fallback, reason: "malformed" };
+  if (!(amount > 0) || !Number.isFinite(amount)) {
+    return { amount: null, currency: markerCurrency ?? declared ?? fallback, reason: "nonpositive" };
+  }
+
+  // Sanity: rating-like floats (1.0–5.0) without currency marker are never prices even with allowBareNumeric
+  if (!hasMarker && amount <= 5 && amount === Math.round(amount * 10) / 10 && String(numRaw).includes(".")) {
+    return { amount: null, currency: declared ?? fallback, reason: "looks_like_rating" };
+  }
+
+  const currency = markerCurrency ?? declared ?? fallback;
+  return { amount, currency };
 }
 
 /**
@@ -66,9 +240,38 @@ export function toReferencePrice(
   retailerId: string | null,
   defaultCurrency: string = "INR"
 ): ReferencePrice | null {
-  const parsed = parsePrice(rawPrice, currency || defaultCurrency);
+  const declared = normalizeCurrencyCode(currency);
+  const parsed = parsePrice(rawPrice, declared || defaultCurrency, {
+    // Screen/JSON-LD often give bare "29999" with a separate currency field
+    allowBareNumeric: Boolean(declared) || Boolean(rawPrice && CURRENCY_MARKER_RE.test(String(rawPrice))),
+    declaredCurrency: declared,
+  });
+  // If raw has no marker but we have declared currency, allow bare numeric
+  if (parsed.amount == null && declared && rawPrice) {
+    const retry = parsePrice(rawPrice, declared, { allowBareNumeric: true, declaredCurrency: declared });
+    if (retry.amount == null) return null;
+    return { amount: retry.amount, currency: retry.currency, retailerId };
+  }
   if (parsed.amount == null) return null;
-  return { amount: parsed.amount, currency: currency || parsed.currency, retailerId };
+  return { amount: parsed.amount, currency: parsed.currency, retailerId };
+}
+
+export function coerceStructuredPrice(
+  price: string | number | null | undefined,
+  currency: string | null | undefined,
+  defaultCurrency: string = "INR"
+): ParsePriceResult {
+  const declared = normalizeCurrencyCode(currency) ?? normalizeCurrencyCode(defaultCurrency) ?? "INR";
+  if (price == null) return { amount: null, currency: declared, reason: "empty" };
+  if (typeof price === "number") {
+    if (!(price > 0) || !Number.isFinite(price)) return { amount: null, currency: declared, reason: "nonpositive" };
+    // 4.4-style one-decimal floats in the rating band are almost never list prices
+    if (price <= 5 && !Number.isInteger(price) && Math.round(price * 10) / 10 === price) {
+      return { amount: null, currency: declared, reason: "looks_like_rating" };
+    }
+    return { amount: price, currency: declared };
+  }
+  return parsePrice(price, declared, { allowBareNumeric: true, declaredCurrency: declared });
 }
 
 function tokenize(s: string): Set<string> {
@@ -124,6 +327,14 @@ export function matchScore(opts: {
   return { score, reason: reasons.join("+") };
 }
 
+/**
+ * The single "hide mismatches" gate: an offer whose currency doesn't match
+ * the user's own country currency is DROPPED, never relabeled.
+ */
+export function filterOffersByCurrency(offers: MarketplaceOffer[], currency: string): MarketplaceOffer[] {
+  return offers.filter((o) => !o.currency || o.currency === currency);
+}
+
 export function normalizeOffer(input: {
   retailer: string;
   retailerId: string;
@@ -140,15 +351,25 @@ export function normalizeOffer(input: {
   matchScore: number;
   matchReason: string;
   checkManually?: boolean;
+  priceConfidence?: number | null;
 }): MarketplaceOffer {
-  const parsed = parsePrice(input.priceRaw ?? null, input.defaultCurrency ?? "INR");
+  const defaultCurrency = normalizeCurrencyCode(input.defaultCurrency) ?? "INR";
+  const declared = normalizeCurrencyCode(input.currency ?? null);
+  const parsed = parsePrice(input.priceRaw ?? null, defaultCurrency, {
+    allowBareNumeric: Boolean(declared),
+    declaredCurrency: declared,
+  });
+
+  // Marker in raw text wins over contradictory declared currency
+  const currency = parsed.amount != null ? parsed.currency : declared ?? defaultCurrency;
+
   return {
     retailer: input.retailer,
     retailerId: input.retailerId,
     url: input.url,
     title: input.title,
     price: parsed.amount,
-    currency: input.currency || parsed.currency,
+    currency,
     priceRaw: input.priceRaw ?? null,
     shipping: input.shipping ?? null,
     deliveryEstimate: input.deliveryEstimate ?? null,
@@ -158,5 +379,28 @@ export function normalizeOffer(input: {
     matchScore: input.matchScore,
     matchReason: input.matchReason,
     checkManually: input.checkManually ?? false,
+    priceConfidence: input.priceConfidence ?? null,
   };
+}
+
+export function sanitizeCachedOffers(raw: unknown): MarketplaceOffer[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MarketplaceOffer[] = [];
+  for (const item of raw) {
+    const parsed = MarketplaceOfferSchema.safeParse(item);
+    if (!parsed.success) continue;
+    // Re-validate priceRaw against contamination for legacy cache rows
+    if (parsed.data.price != null && parsed.data.priceRaw) {
+      const check = parsePrice(parsed.data.priceRaw, parsed.data.currency, {
+        allowBareNumeric: true,
+        declaredCurrency: parsed.data.currency,
+      });
+      if (check.amount == null || check.reason === "contamination" || check.reason === "looks_like_rating") {
+        out.push({ ...parsed.data, price: null, priceRaw: parsed.data.priceRaw });
+        continue;
+      }
+    }
+    out.push(parsed.data);
+  }
+  return out;
 }
