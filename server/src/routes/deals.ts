@@ -6,8 +6,10 @@ import { ProductIdentitySchema } from "../schema.js";
 import { compareProduct } from "../services/compare.js";
 import { calculateDeals } from "../deals/calculator.js";
 import { PAYMENT_CATALOG, type PaymentMethodId } from "../deals/offers.js";
-import { getPaymentProfile } from "../repositories/paymentProfiles.js";
-import { normalizeCountry } from "../marketplaces/registry.js";
+import { getPaymentProfile, getUserPincode } from "../repositories/paymentProfiles.js";
+import { recordScan } from "../repositories/scans.js";
+import { currencyFor, normalizeCountry } from "../marketplaces/registry.js";
+import { MarketplaceOfferSchema, ReferencePriceSchema } from "../marketplaces/normalize.js";
 
 const MethodSchema = z.enum([
   "hdfc_cc",
@@ -25,29 +27,61 @@ const MethodSchema = z.enum([
   "flipkart_plus",
 ]);
 
-const BodySchema = z.object({
-  product: ProductIdentitySchema.partial({
-    brand: true,
-    model: true,
-    confidence: true,
-    searchTerm: true,
-  }).extend({ name: z.string().min(1) }),
-  methods: z.array(MethodSchema).optional(),
-  gtin: z.string().nullable().optional(),
-  country: z.enum(["IN", "US"]).optional(),
-  location: z.object({ lat: z.number(), lon: z.number() }).optional(),
-  /** Live price already on the user's screen for this exact product - used to
-   *  guard against ever badging a same-platform or higher-priced offer as a
-   *  "deal". See deals/calculator.ts isVerifiedDeal. */
-  reference: z
-    .object({
-      amount: z.number().positive(),
-      currency: z.string().min(1),
-      retailerId: z.string().nullable().optional(),
-    })
-    .nullable()
-    .optional(),
+const LocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
 });
+
+const BodySchema = z
+  .object({
+    product: ProductIdentitySchema.partial({
+      brand: true,
+      model: true,
+      confidence: true,
+      searchTerm: true,
+    }).extend({
+      name: z.string().trim().min(1).max(200),
+      brand: z.string().trim().max(80).nullable().optional(),
+      model: z.string().trim().max(80).nullable().optional(),
+      category: z.string().trim().max(40).optional(),
+      searchTerm: z.string().trim().max(200).optional(),
+    }),
+    methods: z.array(MethodSchema).optional(),
+    gtin: z
+      .string()
+      .regex(/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/)
+      .nullable()
+      .optional(),
+    country: z.enum(["IN", "US"]).optional(),
+    location: LocationSchema.optional(),
+    pincode: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
+    reference: ReferencePriceSchema.nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.reference) return;
+    const country = normalizeCountry(data.country);
+    const expected = currencyFor(country);
+    if (data.reference.currency !== expected) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `reference.currency must be ${expected} for country ${country}`,
+        path: ["reference", "currency"],
+      });
+    }
+  });
+
+const DealsResponseSchema = z.object({
+  deals: z.array(z.unknown()),
+  offers: z.array(MarketplaceOfferSchema),
+  productId: z.string().nullable(),
+  cached: z.boolean(),
+  methodsUsed: z.array(MethodSchema),
+  country: z.enum(["IN", "US"]),
+});
+void DealsResponseSchema;
 
 export async function dealsRoute(app: FastifyInstance) {
   app.get("/deals/catalog", { preHandler: requireAuth }, async () => ({
@@ -83,13 +117,18 @@ export async function dealsRoute(app: FastifyInstance) {
       const start = Date.now();
       try {
         const reference = parsed.data.reference ?? null;
+        const pincode = parsed.data.pincode ?? (await getUserPincode(req.user!.id).catch(() => null));
         const compare = await compareProduct(product, {
           gtin: parsed.data.gtin ?? null,
           country,
           location: parsed.data.location ?? null,
+          pincode,
           reference,
         });
         const ranked = country === "US" ? [] : calculateDeals(compare.offers, methods, { reference });
+        if (compare.productId) {
+          await recordScan(req.user!.id, compare.productId).catch(() => {});
+        }
         req.log.info(
           {
             requestId: req.id,
