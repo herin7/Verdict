@@ -1,10 +1,7 @@
 package expo.modules.verdictoverlay
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -15,7 +12,12 @@ class VerdictOverlayModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("VerdictOverlay")
 
-    Events("onBubbleTap")
+    // Fired when an already-warm panel surface is reattached to a window
+    // instead of recreated from scratch (see VerdictOverlayService.showPanel/
+    // reattachExistingPanel) - the surface's view is unchanged/stale from
+    // its last open, so JS (VerdictPanelRoot) needs telling to remount with a
+    // fresh capture rather than showing whatever it last displayed.
+    Events("onPanelReopen")
 
     OnCreate {
       VerdictOverlayBridge.emitter = { name, body ->
@@ -55,18 +57,33 @@ class VerdictOverlayModule : Module() {
       null
     }
 
-    Function("setPanelTranslucent") { translucent: Boolean ->
-      setTranslucent(appContext.currentActivity, translucent)
+    // Closes the floating product panel (a separate ReactSurface hosted
+    // directly by VerdictOverlayService - see showPanel/hidePanel there).
+    Function("closePanel") {
+      closePanelWindow(appContext.reactContext)
       null
     }
 
-    Function("moveTaskToBack") {
-      moveBack(appContext.currentActivity)
+    // The panel never launches MainActivity (that's the whole point - the
+    // shopping app underneath stays live). This is the one deliberate,
+    // user-initiated exception: "open full report" switches to the full app.
+    Function("openMainApp") {
+      openMainAppActivity(appContext.reactContext)
       null
     }
 
-    Function("consumePanelIntent") {
-      consumePanel(appContext.currentActivity)
+    // Called at drag-gesture frequency from the panel's own resize handle -
+    // goes straight to VerdictOverlayService's static method (same package,
+    // no Intent/startService round trip) since that path is far too much
+    // overhead to pay dozens of times a second while dragging.
+    Function("resizePanel") { fraction: Double ->
+      VerdictOverlayService.resizePanel(fraction)
+      null
+    }
+
+    Function("snapPanel") { fraction: Double ->
+      VerdictOverlayService.snapPanel(fraction)
+      null
     }
   }
 
@@ -123,89 +140,34 @@ class VerdictOverlayModule : Module() {
     }
   }
 
-  private fun setTranslucent(activity: Activity?, translucent: Boolean) {
-    if (activity == null) return
-    activity.runOnUiThread {
-      try {
-        val window = activity.window
-        if (translucent) {
-          window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-          window.statusBarColor = Color.TRANSPARENT
-          window.navigationBarColor = Color.TRANSPARENT
-          tryConvertToTranslucent(activity)
-        } else {
-          window.setBackgroundDrawable(ColorDrawable(Color.parseColor("#0B0B0B")))
-          tryConvertFromTranslucent(activity)
-        }
-      } catch (e: Exception) {
-        android.util.Log.w("VerdictOverlay", "setPanelTranslucent failed: ${e.message}")
-      }
+  private fun closePanelWindow(ctx: Context?) {
+    if (ctx == null) return
+    val intent = Intent(ctx, VerdictOverlayService::class.java).apply {
+      action = VerdictOverlayService.ACTION_CLOSE_PANEL
     }
+    ctx.startService(intent)
   }
 
-  private fun tryConvertToTranslucent(activity: Activity) {
+  private fun openMainAppActivity(ctx: Context?) {
+    if (ctx == null) return
     try {
-      val listenerClass = Class.forName("android.app.Activity\$TranslucentConversionListener")
-      val optionsClass = Class.forName("android.app.ActivityOptions")
-      val method = Activity::class.java.getDeclaredMethod(
-        "convertToTranslucent",
-        listenerClass,
-        optionsClass
-      )
-      method.isAccessible = true
-      method.invoke(activity, null, null)
-    } catch (_: Exception) {
-      try {
-        val method = Activity::class.java.getDeclaredMethod("convertToTranslucent")
-        method.isAccessible = true
-        method.invoke(activity)
-      } catch (e: Exception) {
-        android.util.Log.w("VerdictOverlay", "convertToTranslucent unavailable: ${e.message}")
+      val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+      if (launch != null) {
+        launch.addFlags(
+          Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+        ctx.startActivity(launch)
       }
-    }
-  }
-
-  private fun tryConvertFromTranslucent(activity: Activity) {
-    try {
-      val method = Activity::class.java.getDeclaredMethod("convertFromTranslucent")
-      method.isAccessible = true
-      method.invoke(activity)
     } catch (e: Exception) {
-      android.util.Log.w("VerdictOverlay", "convertFromTranslucent unavailable: ${e.message}")
+      android.util.Log.w("VerdictOverlay", "openMainApp failed: ${e.message}")
     }
-  }
-
-  private fun moveBack(activity: Activity?) {
-    if (activity == null) return
-    activity.runOnUiThread {
-      try {
-        activity.moveTaskToBack(true)
-      } catch (e: Exception) {
-        android.util.Log.w("VerdictOverlay", "moveTaskToBack failed: ${e.message}")
-      }
-    }
-  }
-
-  private fun consumePanel(activity: Activity?): Map<String, Any?>? {
-    if (activity == null) return null
-    val intent = activity.intent ?: return null
-    if (!intent.getBooleanExtra(VerdictOverlayService.EXTRA_PANEL, false)) return null
-    val text = intent.getStringExtra(VerdictOverlayService.EXTRA_TEXT)
-    val pkg = intent.getStringExtra(VerdictOverlayService.EXTRA_PKG)
-    intent.removeExtra(VerdictOverlayService.EXTRA_PANEL)
-    intent.removeExtra(VerdictOverlayService.EXTRA_TEXT)
-    intent.removeExtra(VerdictOverlayService.EXTRA_PKG)
-    return mapOf(
-      "panel" to true,
-      "text" to text,
-      "packageName" to pkg,
-    )
   }
 }
 
 object VerdictOverlayBridge {
   var emitter: ((String, Map<String, Any?>) -> Unit)? = null
-
   fun emit(name: String, body: Map<String, Any?> = emptyMap()) {
     emitter?.invoke(name, body)
   }

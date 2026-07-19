@@ -1,7 +1,6 @@
 import { Platform } from "react-native";
 
 type Sub = { remove: () => void };
-
 const noopSub = (): Sub => ({ remove: () => {} });
 
 function loadNative(): any | null {
@@ -42,40 +41,58 @@ export function setBubbleHot(hot: boolean): void {
   Native?.setBubbleHot?.(hot);
 }
 
-/** Make the host Activity translucent so the previous shopping app shows through. */
-export function setPanelTranslucent(translucent: boolean): void {
-  Native?.setPanelTranslucent?.(translucent);
+/**
+ * Closes the floating product panel - a separate ReactSurface ("VerdictPanel")
+ * hosted directly in its own overlay window by VerdictOverlayService, never
+ * an Activity. Call this from within that surface (see VerdictPanelRoot).
+ */
+export function closePanel(): void {
+  Native?.closePanel?.();
 }
 
-/** Send the app task to the background (return to shopping app). */
-export function moveTaskToBack(): void {
-  Native?.moveTaskToBack?.();
+/**
+ * Brings MainActivity to the foreground. The panel itself never does this -
+ * it floats over whatever app is running without ever switching activities -
+ * this is only for the deliberate "open full report" action.
+ */
+export function openMainApp(): void {
+  Native?.openMainApp?.();
 }
 
-/** Read+clear panel launch extras from the Activity intent (cold start). */
-export function consumePanelIntent(): {
-  panel: boolean;
-  text?: string | null;
-  packageName?: string | null;
-} | null {
-  const raw = Native?.consumePanelIntent?.();
-  if (!raw || typeof raw !== "object") return null;
-  if (!raw.panel) return null;
-  return {
-    panel: true,
-    text: (raw.text as string | null) ?? null,
-    packageName: (raw.packageName as string | null) ?? null,
-  };
+/**
+ * Live-resizes the open panel window. `fraction` is 0-1 of screen height,
+ * clamped natively to [PANEL_MIN_HEIGHT_FRACTION, PANEL_MAX_HEIGHT_FRACTION]
+ * (see VerdictOverlayService.kt) - callers don't need to clamp themselves,
+ * but should still throttle calls, since each one is a real window resize.
+ */
+export function resizePanel(fraction: number): void {
+  Native?.resizePanel?.(fraction);
 }
 
-export function addBubbleTapListener(
-  cb: (payload: { text?: string | null; packageName?: string | null; panel?: boolean }) => void
+/** Animate panel height to a snap fraction after drag release. */
+export function snapPanel(fraction: number): void {
+  Native?.snapPanel?.(fraction);
+}
+
+/**
+ * Fires when native reattaches an already-warm panel surface to a window
+ * instead of recreating it from scratch (see VerdictOverlayService.showPanel/
+ * reattachExistingPanel) - the surface's view is otherwise unchanged/stale
+ * from its last open, so VerdictPanelRoot uses this to remount with a fresh
+ * capture rather than showing whatever it last displayed.
+ */
+export function addPanelReopenListener(
+  cb: (text: string, packageName: string) => void
 ): Sub {
   if (!Native?.addListener) return noopSub();
-  return Native.addListener(
-    "onBubbleTap",
-    (p: { text?: string | null; packageName?: string | null; panel?: boolean } = {}) => cb(p ?? {})
+  return Native.addListener("onPanelReopen", (p: { text: string; packageName: string }) =>
+    cb(p.text ?? "", p.packageName ?? "")
   );
 }
+
+/** Mirrors VerdictOverlayService.kt's PANEL_*_HEIGHT_FRACTION constants. */
+export const PANEL_MIN_HEIGHT_FRACTION = 0.32;
+export const PANEL_MAX_HEIGHT_FRACTION = 0.88;
+export const PANEL_DEFAULT_HEIGHT_FRACTION = 0.56;
 
 export const isOverlaySupported = Platform.OS === "android" && Native != null;
