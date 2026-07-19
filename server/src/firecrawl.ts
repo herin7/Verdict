@@ -1,9 +1,15 @@
+import {
+  coerceStructuredPrice,
+  StructuredProductDataSchema,
+  type StructuredProductData as ValidatedStructured,
+} from "./marketplaces/normalize.js";
 import { config } from "./config.js";
 import { recordProviderCall } from "./ai/gateway.js";
 import { fetchWithRetry } from "./http.js";
-import type { SearchResult, ScrapedPage } from "./anakin.js";
+import type { SearchResult, ScrapedPage } from "./providers/types.js";
+import type { StructuredProductData } from "./providers/types.js";
 
-/** Firecrawl is only used as a fallback and only when an API key is configured. */
+/** Firecrawl is the sole research provider - only gated on an API key being configured. */
 export function firecrawlEnabled(): boolean {
   return Boolean(config.firecrawlApiKey);
 }
@@ -11,7 +17,8 @@ export function firecrawlEnabled(): boolean {
 async function fcRequest(
   path: string,
   body: unknown,
-  method: "POST" | "GET" | "DELETE" | "PUT" = "POST"
+  method: "POST" | "GET" | "DELETE" | "PUT" = "POST",
+  signal?: AbortSignal
 ): Promise<any> {
   const start = Date.now();
   const res = await fetchWithRetry(
@@ -23,6 +30,7 @@ async function fcRequest(
         ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
       },
       body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(body),
+      signal,
     },
     { timeoutMs: config.providerHttpTimeoutMs, retries: config.providerHttpRetries }
   );
@@ -56,8 +64,8 @@ async function fcRequest(
 }
 
 /** v2 search returns citations grouped under data.web (url, title, description). */
-export async function firecrawlSearch(query: string, limit = 5): Promise<SearchResult[]> {
-  const json = await fcRequest("/search", { query, limit, sources: ["web"] });
+export async function firecrawlSearch(query: string, limit = 5, signal?: AbortSignal): Promise<SearchResult[]> {
+  const json = await fcRequest("/search", { query, limit, sources: ["web"] }, "POST", signal);
   const web: unknown = json?.data?.web;
   if (!Array.isArray(web)) return [];
   return web
@@ -70,31 +78,50 @@ export async function firecrawlSearch(query: string, limit = 5): Promise<SearchR
 }
 
 /** v2 scrape is synchronous - returns data.markdown directly. */
-export async function firecrawlScrape(url: string): Promise<ScrapedPage | null> {
-  const json = await fcRequest("/scrape", {
-    url,
-    formats: ["markdown"],
-    onlyMainContent: true,
-  });
+export async function firecrawlScrape(url: string, signal?: AbortSignal): Promise<ScrapedPage | null> {
+  const json = await fcRequest(
+    "/scrape",
+    { url, formats: ["markdown"], onlyMainContent: true },
+    "POST",
+    signal
+  );
   const markdown: unknown = json?.data?.markdown;
   if (typeof markdown !== "string" || !markdown.trim()) return null;
   return { url, markdown };
 }
 
 /** Firecrawl includes og:image straight in scrape metadata - no manual HTML parsing needed. */
-export async function firecrawlOgImage(url: string): Promise<string | null> {
-  const json = await fcRequest("/scrape", { url, formats: ["markdown"], onlyMainContent: true });
+export async function firecrawlOgImage(url: string, signal?: AbortSignal): Promise<string | null> {
+  const json = await fcRequest(
+    "/scrape",
+    { url, formats: ["markdown"], onlyMainContent: true },
+    "POST",
+    signal
+  );
   const meta = json?.data?.metadata;
   const image = meta?.ogImage ?? meta?.["og:image"] ?? null;
   return typeof image === "string" && image.trim() ? image : null;
 }
 
 /** Raw HTML fallback for meta tags Firecrawl doesn't normalize (e.g. product:price:amount). */
-export async function firecrawlScrapeHtml(url: string): Promise<string | null> {
-  const json = await fcRequest("/scrape", { url, formats: ["html"], onlyMainContent: false });
+export async function firecrawlScrapeHtml(url: string, signal?: AbortSignal): Promise<string | null> {
+  const json = await fcRequest("/scrape", { url, formats: ["html"], onlyMainContent: false }, "POST", signal);
   const html: unknown = json?.data?.html;
   return typeof html === "string" && html.trim() ? html : null;
 }
+
+/**
+ * Firecrawl's browser-actions API (verified against docs.firecrawl.dev/api-reference/endpoint/scrape
+ * and the advanced-scraping-guide - actions run sequentially, up to 50 per
+ * request). Only the subset this app actually uses is modeled here; the full
+ * API also has screenshot/scrape/executeJavascript/pdf action types.
+ */
+export type FirecrawlAction =
+  | { type: "wait"; milliseconds?: number; selector?: string }
+  | { type: "click"; selector: string; all?: boolean }
+  | { type: "write"; text: string }
+  | { type: "press"; key: string }
+  | { type: "scroll"; direction?: "up" | "down"; selector?: string };
 
 const PRODUCT_EXTRACT_SCHEMA = {
   type: "object",
@@ -114,43 +141,149 @@ const PRODUCT_EXTRACT_SCHEMA = {
   },
 };
 
-/** Schema-based structured extract - used when markdown scrape lacks price/specs. */
+const PRODUCT_JSON_PROMPT =
+  "Extract ONLY the current payable product price for this listing (the amount a buyer pays now). " +
+  "Never use ratings, review counts, star scores, EMI/month amounts, coupon thresholds, cashback, " +
+  "recommended products, or MRP when a sale/deal price is shown. Prefer sale price over MRP/list price. " +
+  "Include currency as INR or USD. Also extract title, brand, model, GTIN/UPC/EAN, seller, stock, image URL.";
+
+function pickVariantPrice(product: Record<string, unknown>): {
+  price: string | null;
+  currency: string | null;
+  inStock: boolean | null;
+  imageUrl: string | null;
+  gtin: string | null;
+} {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const first = variants.find((v) => v && typeof v === "object") as Record<string, unknown> | undefined;
+  const price =
+    (first?.price != null ? String(first.price) : null) ||
+    (product.price != null ? String(product.price) : null) ||
+    (product.currentPrice != null ? String(product.currentPrice) : null);
+  const currency =
+    (typeof first?.currency === "string" ? first.currency : null) ||
+    (typeof product.currency === "string" ? product.currency : null);
+  const availability = typeof first?.availability === "string" ? first.availability.toLowerCase() : "";
+  const inStock =
+    typeof product.inStock === "boolean"
+      ? product.inStock
+      : availability
+        ? !/out|unavailable|sold/.test(availability)
+        : null;
+  const images = Array.isArray(first?.images) ? first.images : Array.isArray(product.images) ? product.images : [];
+  const imageUrl =
+    (typeof images[0] === "string" ? images[0] : null) ||
+    (typeof product.imageUrl === "string" ? product.imageUrl : null) ||
+    (typeof product.image === "string" ? product.image : null);
+  const gtin =
+    (typeof first?.gtin === "string" ? first.gtin : null) ||
+    (typeof product.gtin === "string" ? product.gtin : null) ||
+    (typeof product.sku === "string" ? product.sku : null);
+  return { price, currency, inStock, imageUrl, gtin };
+}
+
+function mapProductFormat(raw: unknown): StructuredProductData | null {
+  if (!raw || typeof raw !== "object") return null;
+  const root = raw as Record<string, unknown>;
+  const product = (root.product && typeof root.product === "object" ? root.product : root) as Record<
+    string,
+    unknown
+  >;
+  const picked = pickVariantPrice(product);
+  const coerced = coerceStructuredPrice(picked.price, picked.currency);
+  const candidate = {
+    title: typeof product.title === "string" ? product.title : typeof product.name === "string" ? product.name : null,
+    brand: typeof product.brand === "string" ? product.brand : null,
+    model: typeof product.model === "string" ? product.model : null,
+    // Only pass price if it survived validation — otherwise leave null (never ship ratings)
+    price: coerced.amount != null ? String(coerced.amount) : null,
+    currency: coerced.amount != null ? coerced.currency : picked.currency,
+    gtin: picked.gtin,
+    upc: typeof product.upc === "string" ? product.upc : null,
+    ean: typeof product.ean === "string" ? product.ean : null,
+    seller: typeof product.seller === "string" ? product.seller : null,
+    inStock: picked.inStock,
+    imageUrl: picked.imageUrl,
+    description: typeof product.description === "string" ? product.description : null,
+  };
+  const parsed = StructuredProductDataSchema.safeParse(candidate);
+  if (!parsed.success) return null;
+  return toProviderShape(parsed.data);
+}
+
+function mapJsonExtract(raw: unknown): StructuredProductData | null {
+  const parsed = StructuredProductDataSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  const coerced = coerceStructuredPrice(data.price ?? null, data.currency ?? null);
+  return toProviderShape({
+    ...data,
+    price: coerced.amount != null ? String(coerced.amount) : null,
+    currency: coerced.amount != null ? coerced.currency : data.currency ?? null,
+  });
+}
+
+function toProviderShape(data: ValidatedStructured): StructuredProductData {
+  return {
+    title: data.title ?? null,
+    brand: data.brand ?? null,
+    model: data.model ?? null,
+    price: data.price != null ? String(data.price) : null,
+    currency: data.currency ?? null,
+    gtin: data.gtin ?? null,
+    upc: data.upc ?? null,
+    ean: data.ean ?? null,
+    seller: data.seller ?? null,
+    inStock: data.inStock ?? null,
+    imageUrl: data.imageUrl ?? null,
+    description: data.description ?? null,
+  };
+}
+
+/** Prefer Firecrawl deterministic `product` format; fall back to schema JSON. Always Zod-validated. */
 export async function firecrawlExtract(
   url: string,
   opts: {
     proxy?: "basic" | "enhanced" | "auto";
     location?: { country: string; languages?: string[] };
-  } = {}
-): Promise<{
-  title?: string | null;
-  brand?: string | null;
-  model?: string | null;
-  price?: string | null;
-  currency?: string | null;
-  gtin?: string | null;
-  upc?: string | null;
-  ean?: string | null;
-  seller?: string | null;
-  inStock?: boolean | null;
-  imageUrl?: string | null;
-  description?: string | null;
-} | null> {
-  const json = await fcRequest("/scrape", {
+    actions?: FirecrawlAction[];
+  } = {},
+  signal?: AbortSignal
+): Promise<StructuredProductData | null> {
+  const common = {
     url,
-    formats: [
-      {
-        type: "json",
-        schema: PRODUCT_EXTRACT_SCHEMA,
-        prompt: "Extract product title, brand, model, price, currency, GTIN/UPC/EAN, seller, stock, image URL.",
-      },
-    ],
     onlyMainContent: true,
     ...(opts.proxy ? { proxy: opts.proxy } : {}),
     ...(opts.location ? { location: opts.location } : {}),
-  });
-  const data = json?.data?.json ?? json?.data?.extract ?? null;
-  if (!data || typeof data !== "object") return null;
-  return data;
+    ...(opts.actions?.length ? { actions: opts.actions } : {}),
+  };
+
+  // One request: product format (cheap/deterministic) + json schema fallback fields
+  const json = await fcRequest(
+    "/scrape",
+    {
+      ...common,
+      formats: [
+        "product",
+        {
+          type: "json",
+          schema: PRODUCT_EXTRACT_SCHEMA,
+          prompt: PRODUCT_JSON_PROMPT,
+        },
+      ],
+    },
+    "POST",
+    signal
+  );
+
+  const fromProduct = mapProductFormat(json?.data?.product ?? json?.data);
+  if (fromProduct?.price) return fromProduct;
+
+  const fromJson = mapJsonExtract(json?.data?.json ?? json?.data?.extract ?? null);
+  if (fromJson?.price) return fromJson;
+
+  // Prefer whichever has a title even without price (manual check path still useful)
+  return fromProduct ?? fromJson;
 }
 
 /** Fields we care about for price/stock change tracking on product pages. */
