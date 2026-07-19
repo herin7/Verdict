@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { cleanScreenText, extractScreenPriceHint, rejoinSplitCurrency } from "../src/identify/screenText.js";
+import {
+  cleanScreenText,
+  extractScreenPriceHint,
+  isolatePrimaryProductRegion,
+  rejoinSplitCurrency,
+} from "../src/identify/screenText.js";
 import { buildPriceCandidate, payableFromEvidence, toReferencePrice } from "../src/marketplaces/normalize.js";
 
 /**
@@ -222,6 +227,32 @@ function testAsinFromUrlInDump() {
   assert.equal(asin, "B09XS7JWHH", "ASIN from amazon.in/dp URL in a11y dump");
 }
 
+function testQuickCommerceRecommendationsCannotReplaceMainProduct() {
+  const dump = [
+    "Amul Taaza Toned Fresh Milk",
+    "1 L",
+    "₹74",
+    "Add",
+    "Product details",
+    "Recommended for you",
+    "Cadbury Dairy Milk Silk",
+    "₹42",
+    "Add",
+    "Maggi 2-Minute Noodles 280 g",
+    "₹58",
+    "Add",
+  ].join("\n");
+  const primary = isolatePrimaryProductRegion(dump);
+  assert.ok(primary.includes("Amul Taaza"), "main quick-commerce product stays");
+  assert.ok(!primary.includes("Cadbury"), "recommended product is cut off");
+  assert.ok(!primary.includes("Maggi"), "later recommendation is cut off");
+
+  const { cleaned, priceHint } = cleanScreenText(dump, "IN");
+  assert.ok(cleaned.includes("Amul Taaza"), "cleaned identity retains main product");
+  assert.ok(!cleaned.includes("Cadbury"), "cleaned identity excludes recommendations");
+  assert.equal(priceHint, "₹74", "main product price wins over recommendation prices");
+}
+
 function main() {
   testAmazonPdpFixtureYieldsStrongSignals();
   testCurrencyMarkedReviewAndEmiNeverWin();
@@ -233,6 +264,7 @@ function main() {
   testSplitCurrencyRejoin();
   testFlipkartPdpPriceHint();
   testAsinFromUrlInDump();
+  testQuickCommerceRecommendationsCannotReplaceMainProduct();
   console.log("screen-text tests passed");
 }
 

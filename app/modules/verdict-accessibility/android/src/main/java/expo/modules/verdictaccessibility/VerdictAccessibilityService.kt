@@ -59,8 +59,14 @@ class VerdictAccessibilityService : AccessibilityService() {
       "search amazon", "search flipkart", "deliver to", "hello,",
       "sign in", "your orders", "returns & orders", "skip to",
       "add to cart", "buy now", "sponsored", "see all", "view all",
-      "customers who", "frequently bought", "related products",
       "today's deals", "best sellers", "join prime",
+    )
+
+    private val RECOMMENDATION_SECTIONS = listOf(
+      "customers who", "customers also", "frequently bought",
+      "related product", "recommended", "you may also like",
+      "you might also like", "more like this", "similar product",
+      "people also buy", "people also bought", "popular with",
     )
 
     /**
@@ -210,7 +216,13 @@ class VerdictAccessibilityService : AccessibilityService() {
       ?: lastPackage
       ?: "unknown"
 
-    val text = tokens.joinToString("\n").take(4000)
+    val recommendationStart = tokens.indexOfFirst { token ->
+      val lower = token.lowercase()
+      RECOMMENDATION_SECTIONS.any { lower.startsWith(it) }
+    }
+    val primaryTokens =
+      if (recommendationStart >= 3) tokens.take(recommendationStart) else tokens.toList()
+    val text = primaryTokens.joinToString("\n").take(4000)
     val enteringFresh = !wasInWatchedApp
     lastText = text
     lastPackage = pkg
@@ -225,7 +237,7 @@ class VerdictAccessibilityService : AccessibilityService() {
     val hot = ScreenProductHeuristic.isProductPage(text, pkg)
     android.util.Log.i(
       "VerdictA11y",
-      "pdp=$hot pkg=$pkg tokens=${tokens.size} preview=${text.take(120).replace('\n', '|')}"
+      "pdp=$hot pkg=$pkg tokens=${primaryTokens.size} preview=${text.take(120).replace('\n', '|')}"
     )
     // Drive hot signal only on real transitions (not gated on text-hash, so a
     // borderline page that flips to a PDP still pulses) — but never re-fire

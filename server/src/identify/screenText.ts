@@ -80,6 +80,8 @@ const CHROME = [
 const ASIN_RE = /\b(B0[A-Z0-9]{8})\b/i;
 const BUY_BOX_RE = /\b(add to cart|buy now|buy it now|proceed to buy|place order|add to bag)\b/i;
 const BREADCRUMB_RE = /(?:^|\n)\s*[\w][\w &'/-]{1,30}(?:\s*[>›]\s*[\w][\w &'/-]{1,30}){1,5}/;
+const RECOMMENDATION_SECTION_RE =
+  /^(?:customers?\s+(?:who|also)|frequently\s+bought|related\s+products?|recommended(?:\s+for\s+you)?|you\s+(?:may|might)\s+also\s+like|more\s+like\s+this|similar\s+products?|people\s+also\s+(?:buy|bought)|popular\s+with)/i;
 /** Prefix currency forms only for glyphs — avoids "P. ₹" from M.R.P. bridging. */
 const CURRENCY_NUM_RE =
   /(?:₹|Rs\.?\s*|INR\b|Rupees?\s*|\$|USD\b)\s*[\d,.]+|[\d,.]+\s*(?:USD\b|INR\b|Rs\.?\b)/gi;
@@ -102,6 +104,26 @@ export function rejoinSplitCurrency(raw: string): string {
 }
 
 /**
+ * Accessibility traversal follows visual order. Recommendation carousels come
+ * after the main PDP, so everything below their heading belongs to another
+ * product and must not influence identity or price.
+ */
+export function isolatePrimaryProductRegion(raw: string): string {
+  const lines = raw
+    .split(/[\n\r|•·]+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const boundary = lines.findIndex((line) => RECOMMENDATION_SECTION_RE.test(line));
+  if (boundary < 3) return raw;
+  const primary = lines.slice(0, boundary);
+  const hasProductEvidence =
+    primary.some((line) => /(?:₹|Rs\.?|INR\b|\$|USD\b)\s*[\d,.]+/i.test(line)) ||
+    primary.some((line) => BUY_BOX_RE.test(line)) ||
+    primary.some((line) => line.length >= 20);
+  return hasProductEvidence ? primary.join("\n") : raw;
+}
+
+/**
  * Collect every currency-marked number, rank payable sale/current near
  * title/buy-box, return null when ambiguous.
  */
@@ -111,7 +133,7 @@ export function extractScreenPriceHint(
 ): { priceHint: string | null; candidates: PriceCandidate[] } {
   const c = normalizeCountry(country);
   const defaultCurrency = c === "US" ? "USD" : "INR";
-  const joined = rejoinSplitCurrency(raw);
+  const joined = isolatePrimaryProductRegion(rejoinSplitCurrency(raw));
   const lines = joined
     .split(/[\n\r|•·]+/)
     .map((p) => p.trim())
@@ -223,7 +245,7 @@ export function cleanScreenText(
 } {
   const c = normalizeCountry(country);
   const priceRe = priceRegexFor(c);
-  const joined = rejoinSplitCurrency(raw);
+  const joined = isolatePrimaryProductRegion(rejoinSplitCurrency(raw));
   const asin = extractAsin(joined);
   const fsn = extractFsn(joined);
   const flipkartItemId = extractFlipkartItemId(joined);

@@ -1,4 +1,4 @@
-import { applyReferenceGuard, currentQuickCommerceOffer } from "./compare.js";
+import { applyReferenceGuard, currentQuickCommerceOffer, passesPackGate } from "./compare.js";
 import {
   filterPricedOffers,
   inferStockStatus,
@@ -116,6 +116,15 @@ const currentQuickOffer = currentQuickCommerceOffer(quickProduct, "IN", {
 assert(currentQuickOffer?.price === 74, "live quick-commerce reference becomes a priced offer");
 assert(currentQuickOffer?.retailerId === "blinkit", "current quick-commerce retailer is preserved");
 assert(currentQuickOffer?.matchReason === "current_listing", "current listing provenance is explicit");
+assert(currentQuickOffer?.locationScope === "device_current", "current listing location provenance is explicit");
+assert(currentQuickOffer?.priceSource === "screen_text", "current listing price source is explicit");
+assert(passesPackGate(quickProduct, "Amul Taaza Toned Milk 1000 ml"), "equivalent pack passes");
+assert(!passesPackGate(quickProduct, "Amul Taaza Toned Milk 500 ml"), "different pack is rejected");
+assert(!passesPackGate(quickProduct, "Amul Taaza Toned Milk"), "grocery without pack evidence is rejected");
+assert(
+  passesPackGate(quickProduct, "Amul Taaza Toned Milk", true),
+  "caller-supplied exact product identity can cover missing title pack"
+);
 assert(
   currentQuickCommerceOffer(quickProduct, "IN", {
     amount: 74,

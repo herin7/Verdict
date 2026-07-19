@@ -306,7 +306,7 @@ function offerFromDirect(
   });
 }
 
-function passesPackGate(
+export function passesPackGate(
   product: ProductIdentity,
   candidateText: string,
   trustedIdentity = false
