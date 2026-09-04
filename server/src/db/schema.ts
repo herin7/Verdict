@@ -1,4 +1,5 @@
 import {
+  integer,
   index,
   jsonb,
   pgTable,
@@ -62,20 +63,6 @@ export const insights = pgTable(
   (t) => [uniqueIndex("insights_product_type_uidx").on(t.productId, t.type)]
 );
 
-export const buyLinks = pgTable(
-  "buy_links",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
-    links: jsonb("links").notNull().default([]),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  },
-  (t) => [uniqueIndex("buy_links_product_uidx").on(t.productId)]
-);
-
 export const scans = pgTable(
   "scans",
   {
@@ -131,54 +118,60 @@ export const ipBans = pgTable(
   (t) => [index("ip_bans_until_idx").on(t.until)]
 );
 
-export const marketplaceOffers = pgTable(
-  "marketplace_offers",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
-    offers: jsonb("offers").notNull().default([]),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  },
-  (t) => [uniqueIndex("marketplace_offers_product_uidx").on(t.productId)]
-);
-
-export const paymentProfiles = pgTable(
-  "payment_profiles",
-  {
-    userId: text("user_id").primaryKey(),
-    methods: jsonb("methods").notNull().default([]),
-    /** 6-digit Indian delivery pincode, asked once - passed into Firecrawl
-     *  `actions` (see marketplaces/registry.ts pincodeActions) so scraped
-     *  prices match what the user would actually pay at their own address. */
-    pincode: text("pincode"),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  }
-);
-
-/** Autonomous shopping missions - agent proposes, human approves. */
-export const shoppingMissions = pgTable(
-  "shopping_missions",
+/**
+ * One row per thing a user shared to Verdict. This row *is* the job: its
+ * status moves queued → identifying → researching → ready (or needs_input /
+ * failed), and the app's inbox is just these rows.
+ */
+export const shares = pgTable(
+  "shares",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
-    title: text("title").notNull(),
-    goal: text("goal").notNull(),
-    status: text("status").notNull().default("draft"),
-    country: text("country").notNull().default("IN"),
-    constraints: jsonb("constraints").notNull().default({}),
+    /** Generated on the phone; makes POST /shares safe to retry. */
+    clientId: text("client_id").notNull(),
+    kind: text("kind").notNull(), // image | url | text
+    /** sha256 of the shared bytes/text, to collapse repeat shares of the same thing. */
+    contentHash: text("content_hash").notNull(),
+    inputText: text("input_text"),
+    inputUrl: text("input_url"),
+    imageKey: text("image_key"),
+    status: text("status").notNull().default("queued"),
+    /** Human-readable progress step shown in the app while working. */
+    stage: text("stage"),
+    extractedText: text("extracted_text"),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     product: jsonb("product"),
-    proposal: jsonb("proposal"),
-    monitorId: text("monitor_id"),
-    events: jsonb("events").notNull().default([]),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    /** Milliseconds spent per stage, for latency profiling. */
+    timings: jsonb("timings").notNull().default({}),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    index("shopping_missions_user_idx").on(t.userId),
-    index("shopping_missions_user_status_idx").on(t.userId, t.status),
-    index("shopping_missions_monitor_idx").on(t.monitorId),
+    uniqueIndex("shares_user_client_uidx").on(t.userId, t.clientId),
+    index("shares_user_updated_idx").on(t.userId, t.updatedAt),
+    index("shares_user_hash_idx").on(t.userId, t.contentHash),
   ]
 );
+
+/** Expo push tokens, one row per installed app. */
+export const devices = pgTable("devices", {
+  expoToken: text("expo_token").primaryKey(),
+  userId: text("user_id").notNull(),
+  platform: text("platform"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Who is currently researching a product. Two shares of the same product
+ * at the same time produce one research run; the second waits for the first.
+ */
+export const researchRuns = pgTable("research_runs", {
+  productId: uuid("product_id")
+    .primaryKey()
+    .references(() => products.id, { onDelete: "cascade" }),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+});

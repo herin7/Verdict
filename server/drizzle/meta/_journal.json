@@ -36,6 +36,13 @@
       "when": 1752906600000,
       "tag": "0004_user_pincode",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "0005_drop_price_tracking",
+      "breakpoints": true
     }
   ]
 }
