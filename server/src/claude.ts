@@ -8,6 +8,7 @@ import {
   ScamDetectorSchema,
   BestInCategorySchema,
   type ConsensusReport,
+  clampCitations,
   type ProductIdentity,
   type IdentifyResult,
   type LongTermScore,
@@ -16,41 +17,8 @@ import {
   type BestInCategory,
 } from "./schema.js";
 import type { ScrapedPage } from "./providers/types.js";
-import { currencyFor, type Country } from "./marketplaces/registry.js";
-
-const CURRENCY_SYMBOL: Record<Country, string> = { IN: "₹", US: "$" };
-
-/**
- * Last-line-of-defense sanitizer: the system prompt instructs the model to
- * only mention the user's own currency, but LLMs free-texting from scraped
- * sources (often US-centric) can still slip in the other symbol. Strip any
- * WRONG-currency priced mention from every free-text field rather than
- * relabeling it (a relabeled symbol on a foreign amount would state a wrong
- * price, e.g. a $999 phone read out as "₹999") - matches the "hide
- * mismatches, never relabel" rule used for offers/buy-links elsewhere.
- * Builds a fresh RegExp per call - reusing one `/g` regex's `.test()` across
- * multiple unrelated strings would corrupt matches via its shared lastIndex.
- */
-function sanitizeReportCurrency(report: ConsensusReport, country: Country): ConsensusReport {
-  const wrongSymbol = country === "US" ? "₹" : "$";
-  const clean = (s: string) => {
-    const wrongRe = new RegExp(`${wrongSymbol === "$" ? "\\$" : wrongSymbol}\\s?[\\d,]+(?:\\.\\d{1,2})?`, "g");
-    return s.replace(wrongRe, "the listed price");
-  };
-  return {
-    ...report,
-    verdictLine: clean(report.verdictLine),
-    consensus: clean(report.consensus),
-    pros: report.pros.map(clean),
-    complaints: report.complaints.map(clean),
-    buyingAdvice: clean(report.buyingAdvice),
-    priceAnalysis: {
-      ...report.priceAnalysis,
-      summary: clean(report.priceAnalysis.summary),
-      reason: clean(report.priceAnalysis.reason),
-    },
-  };
-}
+import type { Country } from "./marketplaces/registry.js";
+import type { EvidencePage } from "./pipeline.js";
 
 const STRONG_SIGNAL_CONFIDENCE_FLOOR = 0.7;
 
@@ -165,124 +133,114 @@ export async function identifyProduct(imageBase64: string): Promise<IdentifyResu
   return result.data;
 }
 
+const citedArray = (description: string, extra: Record<string, unknown> = {}, required: string[] = []) => ({
+  type: "array",
+  description,
+  items: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "One short phrase, under 14 words." },
+      sources: {
+        type: "array",
+        items: { type: "integer" },
+        description: "SOURCE numbers that support this point. At least one. Never cite a source that doesn't say it.",
+      },
+      ...extra,
+    },
+    required: ["text", "sources", ...required],
+  },
+});
+
 const REPORT_TOOL: ToolSpec = {
-  name: "consensus_report",
-  description: "Produce the internet-consensus buying report for the product.",
+  name: "buying_report",
+  description: "Produce an evidence-backed buying verdict for the product.",
   inputSchema: {
     type: "object",
     properties: {
-      verdict: { type: "string", enum: ["buy", "wait", "avoid", "mixed"] },
-      verdictLine: { type: "string", description: "One short punchy sentence, max ~16 words. No fluff." },
-      score: {
-        type: "integer",
-        description: "Overall buy confidence, an integer 0-100 (100 = perfect buy). Not out of 10 or 5.",
-      },
-      consensus: {
+      verdict: {
         type: "string",
-        description: "Max 2 short sentences summarizing what the internet collectively thinks. No filler.",
+        enum: ["buy", "skip", "depends"],
+        description: "buy = worth it for most people; skip = real problems outweigh the good, or a clearly better option exists; depends = right for some buyers and wrong for others.",
       },
-      pros: {
+      verdictLine: { type: "string", description: "One plain sentence, max ~16 words, that a friend would say." },
+      summary: { type: "string", description: "Max 2 short sentences: what owners and reviewers broadly agree on." },
+      bestFor: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Always a JSON array of strings, even if there is only one item. Max 4 items, each a short phrase (under 12 words), not a full paragraph.",
+        description: "2-3 kinds of buyer this suits, as short phrases (e.g. 'Commuters who want strong ANC').",
       },
-      complaints: {
+      notFor: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Always a JSON array of strings, even if there is only one item. Max 4 items, each a short phrase (under 12 words), not a full paragraph.",
+        description: "1-3 kinds of buyer who should look elsewhere, as short phrases.",
       },
-      longTermIssues: {
+      keySpecs: {
         type: "array",
-        items: { type: "string" },
-        description:
-          "Always a JSON array of strings, even if there is only one item. Max 4 items, each one short sentence.",
+        description: "3-6 specs that matter for this category, ONLY if stated in the sources. Empty array otherwise.",
+        items: {
+          type: "object",
+          properties: { label: { type: "string" }, value: { type: "string" } },
+          required: ["label", "value"],
+        },
       },
-      commonFailures: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Always a JSON array of strings, even if there is only one item. Max 4 items, each one short sentence.",
-      },
-      fakeReviewSignal: {
+      pros: citedArray("Max 4 strengths that come up repeatedly."),
+      cons: citedArray("Max 4 weaknesses that come up repeatedly."),
+      recurringIssues: citedArray(
+        "Max 4 problems owners report after real use (defects, failures, software bugs).",
+        { frequency: { type: "string", enum: ["common", "occasional", "rare"] } },
+        ["frequency"]
+      ),
+      risks: citedArray(
+        "Max 3 things that could make this a bad purchase (durability, support, compatibility, counterfeits, safety).",
+        { severity: { type: "string", enum: ["low", "medium", "high"] } },
+        ["severity"]
+      ),
+      fakeReviewRisk: {
         type: "object",
-        description: "Required object - never omit this field.",
         properties: {
           level: { type: "string", enum: ["low", "medium", "high", "unknown"] },
           note: { type: "string", description: "One short sentence, max ~20 words." },
         },
         required: ["level", "note"],
       },
-      priceAnalysis: {
-        type: "object",
-        description: "Required object - never omit this field.",
-        properties: {
-          summary: { type: "string", description: "One short sentence, max ~16 words." },
-          trend: { type: "string", enum: ["rising", "falling", "stable", "unknown"] },
-          shouldWaitForSale: { type: "boolean" },
-          reason: { type: "string", description: "One short sentence, max ~20 words." },
-        },
-        required: ["summary", "trend", "shouldWaitForSale", "reason"],
-      },
       alternatives: {
         type: "array",
-        description:
-          "Always a JSON array of objects, even if there is only one alternative. Max 3 items; keep 'why' to one short phrase.",
+        description: "Max 3 alternatives the sources actually mention, each with a short reason.",
         items: {
           type: "object",
           properties: { name: { type: "string" }, why: { type: "string" } },
           required: ["name", "why"],
         },
       },
-      buyingAdvice: {
-        type: "string",
-        description: "Required - never omit. Max 2-3 short sentences, directly answering 'should I buy this'.",
-      },
-      sources: {
-        type: "array",
-        description: "Always a JSON array of objects, one per source actually used.",
-        items: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            url: { type: "string" },
-            type: { type: "string" },
-          },
-          required: ["title", "url", "type"],
-        },
-      },
+      buyingAdvice: { type: "string", description: "2-3 short sentences answering 'should I buy this?'." },
     },
     required: [
       "verdict",
       "verdictLine",
-      "score",
-      "consensus",
+      "summary",
+      "bestFor",
+      "notFor",
+      "keySpecs",
       "pros",
-      "complaints",
-      "longTermIssues",
-      "commonFailures",
-      "fakeReviewSignal",
-      "priceAnalysis",
+      "cons",
+      "recurringIssues",
+      "risks",
+      "fakeReviewRisk",
       "alternatives",
       "buyingAdvice",
-      "sources",
     ],
   },
 };
 
 export async function synthesizeReport(
   product: ProductIdentity,
-  pages: ScrapedPage[],
-  country: Country = "IN"
+  pages: EvidencePage[],
+  _country: Country = "IN"
 ): Promise<ConsensusReport> {
   const corpus = pages
-    .map((p, i) => `--- SOURCE ${i + 1}: ${p.url} ---\n${p.markdown.slice(0, 6000)}`)
+    .map((p, i) => `--- SOURCE ${i + 1} (${p.type}): ${p.title}\n${p.url}\n${p.markdown.slice(0, 6000)}`)
     .join("\n\n")
     .slice(0, 90000);
-
-  const currencyCode = currencyFor(country);
-  const currencySymbol = CURRENCY_SYMBOL[country];
 
   const result = await runWorkload<ConsensusReport>({
     workload: "report",
@@ -291,16 +249,24 @@ export async function synthesizeReport(
     messages: [
       {
         role: "user",
-        content: `Product: ${product.name} (${product.brand ?? "unknown brand"}, ${product.category}).\n\nProduce the consensus buying report from these sources:\n\n${corpus}`,
+        content: `${productLine(product)}\n\nWrite the buying report from these ${pages.length} sources:\n\n${corpus}`,
       },
     ],
     maxTokens: 4096,
     maxAttempts: 3,
-    system:
-      `You are a purchase-decision analyst. From scraped web sources (Reddit, retailers, YouTube, blogs, forums, news), extract the INTERNET CONSENSUS, not a list of reviews. Identify recurring themes, filter marketing noise and suspicious reviews, and be honest about uncertainty. Base every claim on the provided sources; do not invent facts. Cite the sources you actually used. Be ruthlessly concise everywhere - short phrases over sentences, short sentences over paragraphs. This is read on a phone screen in under 20 seconds, so cut every word that isn't load-bearing. Every field in the tool schema is required - never omit fakeReviewSignal, priceAnalysis, or buyingAdvice.` +
-      ` This user's currency is ${currencyCode} (${currencySymbol}). If you mention any price or amount anywhere in your response (priceAnalysis, buyingAdvice, verdictLine, consensus, pros, complaints), you MUST express it in ${currencyCode} only - never ${country === "US" ? "₹/INR/Rs" : "$/USD"}. Sources may quote prices in a different currency (e.g. a US retailer); when they do, do not restate that foreign number - describe the trend/price-worthiness qualitatively instead (e.g. "priced competitively", "above typical for this category") rather than quoting a number in the wrong currency.`,
+    system: [
+      "You are an independent product analyst helping one shopper decide whether a product is worth buying.",
+      "Use only the numbered sources provided. Every pro, con, issue and risk must cite the SOURCE numbers that support it; if nothing supports a point, leave it out.",
+      "Look for patterns across owners, not one-off opinions. Discount marketing copy and suspiciously uniform praise.",
+      "Be honest about uncertainty: thin or conflicting evidence should lean the verdict to 'depends' and say so.",
+      "Do not state prices, discounts or deals - pricing changes daily and is not part of this report.",
+      "Write for a phone screen: short phrases, no filler, no marketing words.",
+    ].join(" "),
   });
-  return sanitizeReportCurrency(result.data, country);
+
+  // Sources are the pages we actually read - never URLs the model wrote.
+  const sources = pages.map(({ title, url, type }) => ({ title, url, type }));
+  return clampCitations({ ...result.data, sources });
 }
 
 function buildCorpus(pages: ScrapedPage[], perPageChars = 5000, totalChars = 40000): string {

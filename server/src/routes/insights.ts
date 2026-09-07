@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ProductIdentitySchema } from "../schema.js";
-import { fetchInsight } from "../services/insights.js";
 import { requireAuth } from "../auth/plugin.js";
 import type { InsightType } from "../insights.js";
 
@@ -33,6 +32,8 @@ export async function insightsRoute(app: FastifyInstance) {
     };
 
     try {
+      // Lazy: keeps the LLM/research SDKs out of the API's cold start until this route is used.
+      const { fetchInsight } = await import("../services/insights.js");
       const insight = await fetchInsight(type as InsightType, product);
       return { type, insight };
     } catch (err) {

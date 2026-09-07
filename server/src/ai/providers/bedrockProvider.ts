@@ -29,7 +29,7 @@ import type {
  *   Converse with tool use today (moonshotai.kimi-k2.5, zai.glm-4.7 /
  *   zai.glm-4.7-flash / zai.glm-5). Kimi K2.5 tests more reliably eager to
  *   call tools; GLM 4.7 Flash is the cheap option for lower-stakes workloads.
- * - Vision workload (identify_image only - identify_screen/url are text):
+ * - Vision workload (identify_image only - identify_text/url are text):
  *   GLM has no vision. Prefer a vision-capable id in BEDROCK_MODEL_MAP
  *   (e.g. amazon.nova-lite-v1:0) for that workload.
  *

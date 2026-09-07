@@ -25,15 +25,6 @@ export function hostname(url: string): string {
   }
 }
 
-export async function searchWithFallback(
-  q: SourceQuery,
-  limit = 5,
-  timeoutMs = 12000
-): Promise<SearchResult[]> {
-  const out = await orchestratedSearch({ type: q.type, prompt: q.prompt, minResults: 1 }, { limit, timeoutMs });
-  return out.results;
-}
-
 export async function searchMany(
   queries: SourceQuery[],
   opts: { limit?: number; timeoutMs?: number } = {}

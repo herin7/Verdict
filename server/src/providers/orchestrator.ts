@@ -121,6 +121,3 @@ export async function orchestratedExtract(
   }
 }
 
-export function listProviders(): string[] {
-  return firecrawlEnabled() ? [provider.name] : [];
-}

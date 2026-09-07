@@ -3,7 +3,7 @@ import type { z } from "zod";
 /** Every distinct LLM call site in the app. One entry per claude.ts export today, plus the two identify call sites in identify/llmFallback.ts. */
 export type Workload =
   | "identify_image"
-  | "identify_screen"
+  | "identify_text"
   | "identify_url"
   | "report"
   | "insight_long_term"

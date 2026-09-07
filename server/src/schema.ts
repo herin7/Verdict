@@ -89,35 +89,68 @@ export type IdentifyResult = z.infer<typeof IdentifyResultSchema>;
 export const ReportSourceSchema = z.object({
   title: z.string(),
   url: z.string(),
-  // LLM often omits type; freeform string (reddit, web, blog, …) not a closed enum.
+  // reddit, youtube, retail, forum, review, specs, web...
   type: z.string().default("web"),
 });
+export type ReportSource = z.infer<typeof ReportSourceSchema>;
 
+/** 1-based indexes into report.sources backing a claim. */
+// Out-of-range numbers are dropped later by clampCitations, not rejected here.
+const SourceRefs = z.array(z.number().int()).default([]);
+
+/** A claim plus the sources behind it. A bare string from the model becomes an uncited claim. */
+function cited<T extends z.ZodRawShape>(extra: T) {
+  return z.preprocess(
+    (v) => (typeof v === "string" ? { text: v } : v),
+    z.object({ text: z.string(), sources: SourceRefs, ...extra })
+  );
+}
+
+export const REPORT_SCHEMA_VERSION = 3;
+
+/**
+ * The buying report. Every pro, con, issue and risk carries the numbers of
+ * the sources it came from; the source list itself is built by the server
+ * from the pages actually read, never written by the model.
+ */
 export const ConsensusReportSchema = z.object({
-  verdict: z.enum(["buy", "wait", "avoid", "mixed"]),
+  schemaVersion: z.literal(REPORT_SCHEMA_VERSION).default(REPORT_SCHEMA_VERSION),
+  verdict: z.enum(["buy", "skip", "depends"]),
   verdictLine: z.string(),
-  score: z.number().min(0).max(100),
-  consensus: z.string(),
-  pros: z.array(z.string()),
-  complaints: z.array(z.string()),
-  longTermIssues: z.array(z.string()),
-  commonFailures: z.array(z.string()),
+  summary: z.string().default(""),
+  bestFor: z.array(z.string()).default([]),
+  notFor: z.array(z.string()).default([]),
+  keySpecs: z.array(z.object({ label: z.string(), value: z.string() })).default([]),
+  pros: z.array(cited({})).default([]),
+  cons: z.array(cited({})).default([]),
+  recurringIssues: z.array(cited({ frequency: z.enum(["common", "occasional", "rare"]).default("occasional") })).default([]),
+  risks: z.array(cited({ severity: z.enum(["low", "medium", "high"]).default("medium") })).default([]),
   // ponytail: LLM tool output often drops these; coerceToSchema applies .default() before parse.
-  fakeReviewSignal: z.object({
-    level: z.enum(["low", "medium", "high", "unknown"]).default("unknown"),
-    note: z.string().default(""),
-  }),
-  priceAnalysis: z.object({
-    summary: z.string().default(""),
-    trend: z.enum(["rising", "falling", "stable", "unknown"]).default("unknown"),
-    shouldWaitForSale: z.boolean().default(false),
-    reason: z.string().default(""),
-  }),
-  alternatives: z.array(z.object({ name: z.string(), why: z.string() })),
+  fakeReviewRisk: z
+    .object({
+      level: z.enum(["low", "medium", "high", "unknown"]).default("unknown"),
+      note: z.string().default(""),
+    })
+    .default({ level: "unknown", note: "" }),
+  alternatives: z.array(z.object({ name: z.string(), why: z.string() })).default([]),
   buyingAdvice: z.string().default("Unable to summarize."),
-  sources: z.array(ReportSourceSchema),
+  sources: z.array(ReportSourceSchema).default([]),
 });
 export type ConsensusReport = z.infer<typeof ConsensusReportSchema>;
+
+/** Drop citation numbers that don't point at a real source. */
+export function clampCitations(report: ConsensusReport): ConsensusReport {
+  const n = report.sources.length;
+  const fix = <T extends { sources: number[] }>(items: T[]) =>
+    items.map((item) => ({ ...item, sources: [...new Set(item.sources)].filter((i) => i >= 1 && i <= n) }));
+  return {
+    ...report,
+    pros: fix(report.pros),
+    cons: fix(report.cons),
+    recurringIssues: fix(report.recurringIssues),
+    risks: fix(report.risks),
+  };
+}
 
 // --- Deep-dive insights -----------------------------------------------------
 // Each is fetched lazily/on-demand from the client, independent of the main

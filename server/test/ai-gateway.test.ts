@@ -6,6 +6,7 @@
  * Matches the project's existing test convention (see src/deals/calculator.test.ts):
  * plain assert() + tsx, no test runner framework.
  */
+import { z } from "zod";
 import { runWorkloadWithProviders } from "../src/ai/gateway.js";
 import { coerceToSchema } from "../src/coerce.js";
 import { IdentifyResultSchema, ConsensusReportSchema, ProductIdentitySchema } from "../src/schema.js";
@@ -185,7 +186,7 @@ async function main() {
   //        actual coerceToSchema() helper the adapters use, to prove the pattern
   //        itself is sound without touching Anthropic/Bedrock SDKs. -----------
   {
-    const RetrySchema = ConsensusReportSchema.pick({ verdict: true, score: true });
+    const RetrySchema = z.object({ verdict: z.enum(["buy", "skip", "depends"]), score: z.number() });
 
     async function fakeCallToolWithValidation(
       rawAttempts: unknown[],
@@ -224,7 +225,7 @@ async function main() {
 
     // coerceToSchema itself normalizes a numeric-string score (proves the same
     // coercion helper the real adapters call actually does its job)
-    const coercedScore = coerceToSchema(RetrySchema, { verdict: "wait", score: "77" });
+    const coercedScore = coerceToSchema(RetrySchema, { verdict: "skip", score: "77" });
     assert((coercedScore as any).score === 77, "coerceToSchema should coerce numeric-string score to a number");
   }
 
@@ -279,22 +280,18 @@ async function main() {
         const raw = {
           verdict: "buy",
           verdictLine: "Great daily driver headphone for the price.",
-          score: 88,
-          consensus: "Widely praised for ANC and comfort; minor gripes about touch controls.",
-          pros: ["Best-in-class ANC", "Comfortable for long wear"],
-          complaints: ["Touch controls finicky"],
-          longTermIssues: ["Ear cushions wear after ~2 years"],
-          commonFailures: ["Occasional Bluetooth pairing drop"],
-          fakeReviewSignal: { level: "low", note: "Review pattern looks organic across sources." },
-          priceAnalysis: {
-            summary: "Frequently discounted around major sales.",
-            trend: "falling",
-            shouldWaitForSale: true,
-            reason: "Historically 20% off during sales events.",
-          },
+          summary: "Widely praised for ANC and comfort; minor gripes about touch controls.",
+          bestFor: ["Frequent flyers", "Office commuters"],
+          notFor: ["Gym use"],
+          keySpecs: [{ label: "Battery", value: "30 h with ANC" }],
+          // A bare string (as models sometimes return) must become an uncited claim.
+          pros: ["Best-in-class ANC", { text: "Comfortable for long wear", sources: [1] }],
+          cons: [{ text: "Touch controls finicky", sources: [1] }],
+          recurringIssues: [{ text: "Ear cushions wear after ~2 years", sources: [1], frequency: "common" }],
+          risks: [{ text: "Hinge can crack if dropped", sources: [1], severity: "medium" }],
+          fakeReviewRisk: { level: "low", note: "Review pattern looks organic across sources." },
           alternatives: [{ name: "Bose QC Ultra", why: "Stronger ANC in noisy environments" }],
-          buyingAdvice: "Buy now if you need it; wait for a sale if you can.",
-          sources: [{ title: "Reddit thread", url: "https://reddit.com/x", type: "reddit" }],
+          buyingAdvice: "Buy it if you travel a lot.",
         };
         const coerced = coerceToSchema(req.schema, raw);
         const parsed = req.schema.parse(coerced);
@@ -310,6 +307,7 @@ async function main() {
     assert(validated.success, "report golden result must validate against real ConsensusReportSchema");
     assert(result.data.verdict === "buy", "report golden result carries through the fake payload");
     assert(result.data.pros.length === 2, "report golden result arrays survive the round trip");
+    assert(result.data.pros[0]?.text === "Best-in-class ANC", "bare-string claims are coerced to cited points");
   }
 
   // --- 5. retryHint pattern: a schema-valid result that fails the caller's
@@ -337,7 +335,7 @@ async function main() {
     // Amazon-PDP-like fixture: first attempt under-confident despite an ASIN
     // and buy box being present, second attempt corrects to high confidence.
     const pdpRequest = baseRequest<import("../src/schema.js").ProductIdentity>({
-      workload: "identify_screen",
+      workload: "identify_text",
       schema: ProductIdentitySchema,
       maxAttempts: 3,
       retryHint: (data) => (data.confidence < 0.7 ? "strong PDP evidence present, look again" : null),
@@ -392,7 +390,7 @@ async function main() {
         },
       ],
       baseRequest<import("../src/schema.js").ProductIdentity>({
-        workload: "identify_screen",
+        workload: "identify_text",
         schema: ProductIdentitySchema,
         maxAttempts: 2,
         retryHint: (data) => (data.confidence < 0.7 ? "strong PDP evidence present, look again" : null),
@@ -404,7 +402,7 @@ async function main() {
     );
   }
 
-  // --- 6. Golden regression: identify_screen workload accepts a realistic
+  // --- 6. Golden regression: identify_text workload accepts a realistic
   //         Amazon-PDP-like fixture (ASIN + buy box + price + clear title)
   //         at high confidence through the real gateway plumbing. -------------
   {
@@ -426,11 +424,11 @@ async function main() {
     });
 
     const result = await runWorkloadWithProviders(
-      baseRequest({ workload: "identify_screen", schema: ProductIdentitySchema, maxTokens: 512 }),
+      baseRequest({ workload: "identify_text", schema: ProductIdentitySchema, maxTokens: 512 }),
       [fakeScreenProvider]
     );
     const validated = ProductIdentitySchema.safeParse(result.data);
-    assert(validated.success, "identify_screen golden result must validate against real ProductIdentitySchema");
+    assert(validated.success, "identify_text golden result must validate against real ProductIdentitySchema");
     assert(result.data.confidence >= 0.7, "clear Amazon PDP fixture should yield high confidence");
   }
 
