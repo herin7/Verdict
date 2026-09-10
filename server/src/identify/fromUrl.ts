@@ -229,7 +229,7 @@ function deterministicFromHtml(url: string, html: string): PartialIdentity {
     name: cleanTitle,
     brand,
     model,
-    category: findMarketplace(url)?.categories[0] ?? "general",
+    category: findMarketplace(url)?.category ?? "general",
     gtin,
     price,
     currency,
