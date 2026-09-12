@@ -1,21 +1,29 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { config } from "../config.js";
 import * as schema from "./schema.js";
 
 export type Db = ReturnType<typeof createDb>;
 
 function createDb() {
-  if (!config.databaseUrl) {
-    throw new Error("DATABASE_URL is not set");
-  }
-  const sql = neon(config.databaseUrl);
-  return drizzle(sql, { schema });
+  if (!config.databaseUrl) throw new Error("DATABASE_URL is not set");
+  const client = postgres(config.databaseUrl, {
+    // Small pool: a Lambda instance handles one request at a time.
+    max: config.isLambda ? 1 : 5,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    // Named prepared statements: without them postgres.js spends an extra round trip describing
+    // every parameterized query.
+    prepare: true,
+    // Skips a type-lookup query on connect; the schema has no Postgres array columns.
+    fetch_types: false,
+  });
+  return drizzle(client, { schema });
 }
 
 let _db: Db | null = null;
 
-/** Lazy singleton - only connects when db is actually used. */
+/** Lazy singleton - only connects when the database is actually used. */
 export function getDb(): Db {
   if (!_db) _db = createDb();
   return _db;
@@ -25,13 +33,9 @@ export function dbAvailable(): boolean {
   return config.dbEnabled;
 }
 
-const TRANSIENT_ERR = /fetch failed|socketerror|econnreset|etimedout|other side closed|network/i;
+const TRANSIENT_ERR = /econnreset|etimedout|connection terminated|connect_timeout|network/i;
 
-/**
- * Neon's HTTP driver occasionally drops the connection on flaky networks
- * (see neondatabase/serverless#146). Retry transient failures a couple
- * times with a short backoff before giving up.
- */
+/** Retries transient connection errors a couple of times with a short backoff. */
 export async function withDbRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -39,11 +43,8 @@ export async function withDbRetry<T>(fn: () => Promise<T>, retries = 2): Promise
       return await fn();
     } catch (err) {
       lastErr = err;
-      const message = String((err as { message?: string; cause?: { message?: string } })?.message ?? err);
-      const causeMessage = String((err as { cause?: { message?: string } })?.cause?.message ?? "");
-      const isTransient = TRANSIENT_ERR.test(message) || TRANSIENT_ERR.test(causeMessage);
-      if (!isTransient || attempt === retries) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+      if (attempt === retries || !TRANSIENT_ERR.test(String((err as Error)?.message ?? err))) throw err;
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
     }
   }
   throw lastErr;

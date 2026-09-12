@@ -1,4 +1,5 @@
 import pino from "pino";
+import { config } from "../config.js";
 
 /**
  * Standalone pino logger for code paths outside a Fastify request (ai gateway,
@@ -9,7 +10,7 @@ import pino from "pino";
  * the metadata fields below.
  */
 export const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
+  level: config.logLevel,
 });
 
 /** Common structured fields for provider/request/route events. All optional - callers fill in what they have. */

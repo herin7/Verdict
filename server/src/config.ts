@@ -18,13 +18,38 @@ function optionalJson<T>(name: string, fallback: T): T {
   }
 }
 
+const nodeEnv = optional("NODE_ENV", "development");
+
+function configuredSupabaseValue(name: "SUPABASE_URL" | "SUPABASE_JWT_ISSUER") {
+  const value = optional(name);
+  const isExampleValue = value.includes("your-project.supabase.co");
+
+  if (isExampleValue && nodeEnv === "production") {
+    throw new Error(`${name} still contains the example Supabase hostname`);
+  }
+
+  // A copied .env.example must keep local development in soft-auth mode.
+  return isExampleValue ? "" : value;
+}
+
+const supabaseUrl = configuredSupabaseValue("SUPABASE_URL");
+const supabaseJwtIssuer = configuredSupabaseValue("SUPABASE_JWT_ISSUER");
+const corsOrigins = optional("CORS_ORIGINS", "*")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+if (nodeEnv === "production" && corsOrigins.includes("*")) {
+  throw new Error("CORS_ORIGINS must list explicit origins in production");
+}
+
 export type AiProviderName = "anthropic" | "bedrock" | "bedrock-mantle";
 export type AiPolicy = Partial<Record<Workload, AiProviderName[]>>;
 export type BedrockModelMap = Partial<Record<Workload, string>>;
 
 const ALL_WORKLOADS: Workload[] = [
   "identify_image",
-  "identify_screen",
+  "identify_text",
   "identify_url",
   "report",
   "insight_long_term",
@@ -49,6 +74,9 @@ const DEFAULT_BEDROCK_MODEL_MAP: BedrockModelMap = Object.fromEntries(
 ) as BedrockModelMap;
 
 export const config = {
+  nodeEnv,
+  logLevel: optional("LOG_LEVEL", nodeEnv === "production" ? "info" : "debug"),
+  corsOrigins,
   /** Optional - Anthropic left off the default provider chain. Only used if AI_POLICY explicitly lists "anthropic". */
   anthropicApiKey: optional("ANTHROPIC_API_KEY"),
   anthropicModel: optional("ANTHROPIC_MODEL", "claude-sonnet-5"),
@@ -58,34 +86,28 @@ export const config = {
   // permanently out of credits with no top-up path).
   firecrawlApiKey: optional("FIRECRAWL_API_KEY"),
   firecrawlBaseUrl: "https://api.firecrawl.dev/v2",
-  /** Public base URL of this server (used to register Firecrawl monitor webhooks). Unset = no auto webhook URL. */
-  publicBaseUrl: optional("PUBLIC_BASE_URL"),
-  /** Shared secret for POST /webhooks/firecrawl. Unset = webhook route rejects all calls. */
-  firecrawlWebhookSecret: optional("FIRECRAWL_WEBHOOK_SECRET"),
 
   databaseUrl: optional("DATABASE_URL"),
-  supabaseUrl: optional("SUPABASE_URL"),
-  supabaseJwtIssuer: optional("SUPABASE_JWT_ISSUER"),
+  /** True inside AWS Lambda (set by the runtime). */
+  isLambda: Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME),
+  awsRegion: process.env.AWS_REGION?.trim() || "ap-south-1",
+  /** S3 bucket for shared screenshots/images. */
+  sharesBucket: optional("SHARES_BUCKET"),
+  /** Name of the worker Lambda the API invokes asynchronously. Unset = run in-process (local dev). */
+  workerFunctionName: optional("WORKER_FUNCTION_NAME"),
+  supabaseUrl,
+  supabaseJwtIssuer,
   /** Legacy HS256 "JWT Secret" from Supabase dashboard (Settings > API) - only needed
    *  if the project has NOT been migrated to asymmetric JWT signing keys. */
   supabaseJwtSecret: optional("SUPABASE_JWT_SECRET"),
 
   reportTtlDays: Number(process.env.REPORT_TTL_DAYS) || 7,
   insightTtlDays: Number(process.env.INSIGHT_TTL_DAYS) || 7,
-  buyLinkTtlHours: Number(process.env.BUY_LINK_TTL_HOURS) || 24,
-  offerTtlHours: Number(process.env.OFFER_TTL_HOURS) || 6,
 
   /** Soft-auth mode when Supabase env not set - for local pipeline work without identity. */
-  authEnabled: Boolean(process.env.SUPABASE_JWT_ISSUER?.trim()),
+  authEnabled: Boolean(supabaseJwtIssuer),
   /** Soft-db mode when Neon not set - cache skipped, pipeline still runs. */
   dbEnabled: Boolean(process.env.DATABASE_URL?.trim()),
-  /**
-   * Shopping Missions require DB persistence. Soft-off when DATABASE_URL unset,
-   * or when MISSIONS_ENABLED=false/0 explicitly.
-   */
-  missionsEnabled:
-    Boolean(process.env.DATABASE_URL?.trim()) &&
-    !["0", "false", "off"].includes((process.env.MISSIONS_ENABLED ?? "true").trim().toLowerCase()),
 
   /** AWS region for Bedrock Converse/Mantle. Unset = Bedrock providers disabled. */
   bedrockRegion: optional("BEDROCK_REGION"),
