@@ -6,41 +6,33 @@
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "scheme": "verdict",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.verdict.app",
-      "infoPlist": {
-        "NSCameraUsageDescription": "Point your camera at a product to research it.",
-        "NSLocationWhenInUseUsageDescription": "Verdict uses your approximate location to show accurate prices and availability on location-gated quick-commerce apps."
-      }
+      "bundleIdentifier": "com.herin.verdict"
     },
     "android": {
-      "package": "com.verdict.app",
+      "package": "com.herin.verdict",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "monochromeImage": "./assets/monochrome-icon.png",
-        "backgroundColor": "#0F172A"
+        "backgroundColor": "#1F3BD6"
       },
-      "permissions": [
-        "CAMERA",
-        "SYSTEM_ALERT_WINDOW",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_SPECIAL_USE",
-        "POST_NOTIFICATIONS",
-        "ACCESS_COARSE_LOCATION"
-      ]
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
+      "expo-font",
       [
-        "expo-camera",
+        "expo-splash-screen",
         {
-          "cameraPermission": "Point your camera at a product to research it."
+          "backgroundColor": "#1F3BD6",
+          "image": "./assets/adaptive-icon.png",
+          "imageWidth": 160,
+          "dark": {
+            "backgroundColor": "#080B16"
+          }
         }
       ],
-      "expo-sharing",
-      "expo-font",
-      "expo-splash-screen",
       "expo-secure-store",
       "expo-dev-client",
       [
@@ -52,21 +44,43 @@
           ],
           "iosActivationRules": {
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
-            "NSExtensionActivationSupportsText": true
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsImageWithMaxCount": 1
           }
         }
       ],
-      "./modules/verdict-overlay/app.plugin.js",
-      "./modules/verdict-accessibility/app.plugin.js",
-      "expo-localization",
       [
-        "expo-location",
+        "expo-notifications",
         {
-          "locationWhenInUsePermission": "Verdict uses your approximate location to show accurate prices and availability on location-gated quick-commerce apps.",
-          "isAndroidBackgroundLocationEnabled": false,
-          "isAndroidForegroundServiceEnabled": false
+          "color": "#1F3BD6"
         }
-      ]
-    ]
+      ],
+      "expo-router",
+      "expo-image",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "ShareExtension",
+                  "bundleIdentifier": "com.verdict.app.share-extension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.herin.verdict"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "fcae8544-9bd7-490b-9410-f5c12dbafb2b"
+      },
+      "router": {}
+    }
   }
 }

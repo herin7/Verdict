@@ -1,128 +1,140 @@
-/** India Daylight — single source for color, type, space, motion. No hex in screens. */
+import { Appearance } from "react-native";
 
-export const colors = {
-  bg: "#F7F8FA",
-  bgElevated: "#FFFFFF",
+/**
+ * Single source for color, type, spacing, radius, shadow and motion.
+ * Screens never hardcode these values.
+ *
+ * Brand: deep "trust" blue carries the UI (headers, primary actions, selection);
+ * a warm yellow marks the moments that matter.
+ * The scheme is read once at launch.
+ */
+const isDark = Appearance.getColorScheme() === "dark";
+
+const light = {
+  // Brand
+  primary: "#1F3BD6",
+  primaryPressed: "#172EAD",
+  primaryDeep: "#0E1F7A", // header bands
+  primarySoft: "#E8ECFF",
+  onPrimary: "#FFFFFF",
+  accent: "#FFC531", // yellow
+  accentSoft: "#FFF4D1",
+  onAccent: "#1A1404",
+
+  // Neutrals
+  bg: "#F2F4F9",
   surface: "#FFFFFF",
-  surfaceElevated: "#FFFFFF",
-  surfaceMuted: "#F1F5F9",
-  border: "#E2E8F0",
-  /** @deprecated use border */
-  surfaceBorder: "#E2E8F0",
+  surfaceMuted: "#EEF1F7",
+  border: "#E1E5EE",
+  text: "#0B1228",
+  textMuted: "#535C75",
+  textFaint: "#8790A6",
+  scrim: "rgba(8, 12, 30, 0.55)",
 
-  text: "#0F172A",
-  textMuted: "#64748B",
-  textFaint: "#94A3B8",
-
-  accent: "#EA580C",
-  accentSoft: "rgba(234,88,12,0.12)",
-  onAccent: "#FFFFFF",
-
-  buy: "#0F766E",
-  buySoft: "rgba(15,118,110,0.12)",
-  wait: "#B45309",
-  waitSoft: "rgba(180,83,9,0.12)",
-  avoid: "#E11D48",
-  avoidSoft: "rgba(225,29,72,0.10)",
-  mixed: "#7C3AED",
-  mixedSoft: "rgba(124,58,237,0.10)",
-
-  overlayScrim: "rgba(15,23,42,0.45)",
-  ticketPerforation: "#CBD5E1",
+  // Verdict semantics
+  buy: "#0F9D58",
+  buySoft: "#E2F6EB",
+  wait: "#D97706",
+  waitSoft: "#FDF0DD",
+  avoid: "#DC2F45",
+  avoidSoft: "#FDE7EA",
 };
 
-export type VerdictKind = "buy" | "wait" | "avoid" | "mixed";
+const dark: typeof light = {
+  primary: "#6F88FF",
+  primaryPressed: "#5A74F0",
+  primaryDeep: "#101A4A",
+  primarySoft: "#1A2452",
+  onPrimary: "#FFFFFF",
+  accent: "#FFC940",
+  accentSoft: "#3A2F0E",
+  onAccent: "#1A1404",
 
-export const verdictGradient: Record<VerdictKind, [string, string]> = {
-  buy: ["#ECFDF5", "#FFFFFF"],
-  wait: ["#FFFBEB", "#FFFFFF"],
-  avoid: ["#FFF1F2", "#FFFFFF"],
-  mixed: ["#F5F3FF", "#FFFFFF"],
+  bg: "#080B16",
+  surface: "#121828",
+  surfaceMuted: "#1A2236",
+  border: "#252E45",
+  text: "#F1F4FC",
+  textMuted: "#A7B0C6",
+  textFaint: "#6E7891",
+  scrim: "rgba(0, 0, 0, 0.6)",
+
+  buy: "#34C77B",
+  buySoft: "#10291D",
+  wait: "#F5A524",
+  waitSoft: "#2E2210",
+  avoid: "#FF5C6F",
+  avoidSoft: "#331419",
 };
+
+export const colors = isDark ? dark : light;
+
+export const statusBarStyle = isDark ? "light" : "dark";
+
+export type VerdictKind = "buy" | "skip" | "depends";
 
 export const verdictColor: Record<VerdictKind, string> = {
   buy: colors.buy,
-  wait: colors.wait,
-  avoid: colors.avoid,
-  mixed: colors.mixed,
+  skip: colors.avoid,
+  depends: colors.wait,
 };
 
 export const verdictSoft: Record<VerdictKind, string> = {
   buy: colors.buySoft,
-  wait: colors.waitSoft,
-  avoid: colors.avoidSoft,
-  mixed: colors.mixedSoft,
+  skip: colors.avoidSoft,
+  depends: colors.waitSoft,
 };
 
 export const verdictLabel: Record<VerdictKind, string> = {
   buy: "Buy",
-  wait: "Wait",
-  avoid: "Avoid",
-  mixed: "Mixed",
+  skip: "Skip",
+  depends: "Depends",
 };
 
-/** Primary CTA gradient (mango). */
-export const ctaGradient: [string, string] = ["#FB923C", "#EA580C"];
-/** @deprecated use ctaGradient */
-export const goldGradient = ctaGradient;
-
-export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
-
-/** 4pt spacing scale: space(4) = 16 */
+/** 4pt grid: space(4) = 16 */
 export const space = (n: number) => n * 4;
-export const spacing = space;
 
-export const iconSize = { sm: 16, md: 20, lg: 24, xl: 32 };
+export const radius = { sm: 8, md: 12, lg: 16, xl: 24, full: 999 } as const;
+
+export const iconSize = { sm: 16, md: 20, lg: 24, xl: 32 } as const;
+
 export const hitSlop = { top: 8, bottom: 8, left: 8, right: 8 };
-/** Prefer StyleSheet.hairlineWidth at call sites; token for consistent 1px borders. */
-export const hairline = 1;
 
-export const elevation = {
-  soft: {
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  card: {
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-};
+export const shadow = {
+  card: isDark ? "0 1px 2px rgba(0, 0, 0, 0.4)" : "0 1px 3px rgba(14, 31, 122, 0.06)",
+  raised: isDark ? "0 6px 16px rgba(0, 0, 0, 0.45)" : "0 6px 20px rgba(14, 31, 122, 0.10)",
+} as const;
 
 export const motion = {
-  fast: 180,
-  normal: 320,
-  slow: 520,
-  spring: { damping: 18, stiffness: 220, mass: 0.85 },
-};
+  fast: 150,
+  normal: 250,
+  slow: 400,
+  spring: { damping: 18, stiffness: 260, mass: 0.8 },
+} as const;
 
 export const fonts = {
-  serif: "InstrumentSerif_400Regular",
-  serifItalic: "InstrumentSerif_400Regular_Italic",
-  sans: "Arimo_400Regular",
-  sansMedium: "Arimo_500Medium",
-  sansSemiBold: "Arimo_600SemiBold",
-  sansBold: "Arimo_700Bold",
-  mono: "JetBrainsMono_500Medium",
-  monoBold: "JetBrainsMono_700Bold",
-};
+  regular: "PlusJakartaSans_400Regular",
+  medium: "PlusJakartaSans_500Medium",
+  semibold: "PlusJakartaSans_600SemiBold",
+  bold: "PlusJakartaSans_700Bold",
+  extrabold: "PlusJakartaSans_800ExtraBold",
+} as const;
 
-export const font = {
-  display: { fontFamily: fonts.serif, fontSize: 40, letterSpacing: 0.2, lineHeight: 44 },
-  h1: { fontFamily: fonts.serif, fontSize: 32, letterSpacing: 0.2, lineHeight: 38 },
-  h2: { fontFamily: fonts.sansSemiBold, fontSize: 18, letterSpacing: -0.2, lineHeight: 24 },
-  h3: { fontFamily: fonts.sansSemiBold, fontSize: 16, letterSpacing: -0.1, lineHeight: 22 },
-  body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 22 },
-  bodyMedium: { fontFamily: fonts.sansMedium, fontSize: 15, lineHeight: 22 },
-  small: { fontFamily: fonts.sansSemiBold, fontSize: 13, lineHeight: 18 },
-  caption: { fontFamily: fonts.sans, fontSize: 12, lineHeight: 16 },
-  label: { fontFamily: fonts.sansBold, fontSize: 11, letterSpacing: 0.6, lineHeight: 14 },
-  mono: { fontFamily: fonts.monoBold, fontSize: 14, lineHeight: 18 },
-  monoSm: { fontFamily: fonts.mono, fontSize: 11, letterSpacing: 0.4, lineHeight: 14 },
-  tab: { fontFamily: fonts.sansSemiBold, fontSize: 11, lineHeight: 14 },
+/** Five sizes, one family. Hierarchy comes from weight and color. */
+export const type = {
+  display: { fontFamily: fonts.extrabold, fontSize: 28, lineHeight: 34, letterSpacing: -0.6, color: colors.text },
+  title: { fontFamily: fonts.bold, fontSize: 20, lineHeight: 26, letterSpacing: -0.3, color: colors.text },
+  headline: { fontFamily: fonts.bold, fontSize: 16, lineHeight: 22, color: colors.text },
+  body: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24, color: colors.text },
+  bodyStrong: { fontFamily: fonts.semibold, fontSize: 16, lineHeight: 22, color: colors.text },
+  subhead: { fontFamily: fonts.medium, fontSize: 14, lineHeight: 20, color: colors.textMuted },
+  caption: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, color: colors.textMuted },
+  overline: {
+    fontFamily: fonts.bold,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.8,
+    textTransform: "uppercase" as const,
+    color: colors.textFaint,
+  },
 };

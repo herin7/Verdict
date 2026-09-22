@@ -3,7 +3,7 @@ import PostHog from "posthog-react-native";
 const apiKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY?.trim() ?? "";
 const host = process.env.EXPO_PUBLIC_POSTHOG_HOST?.trim() || "https://us.i.posthog.com";
 
-export const posthogConfigured = Boolean(apiKey);
+const posthogConfigured = Boolean(apiKey);
 
 // Manual client only - no PostHogProvider, so no autocapture/touch/screen
 // tracking and no session replay. Soft-disabled (no-op) when the key is unset.

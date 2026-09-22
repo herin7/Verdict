@@ -1,42 +1,29 @@
-import { useEffect, useRef } from "react";
-import { Animated, type StyleProp, type ViewStyle } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
+import Animated, { FadeInDown, ReduceMotion } from "react-native-reanimated";
+import { motion } from "../theme";
 
-/** Fades + slides content in on mount, so swapped stages/cards never just snap into view. */
+/**
+ * Fades + slides content in on mount. Change `key` to replay.
+ * Runs on the UI thread and is skipped when the OS "reduce motion" setting is on.
+ */
 export function FadeIn({
   children,
-  duration = 340,
-  distance = 12,
+  duration = motion.normal,
   delay = 0,
   style,
 }: {
   children: React.ReactNode;
   duration?: number;
-  distance?: number;
   delay?: number;
   style?: StyleProp<ViewStyle>;
 }) {
-  const progress = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    progress.setValue(0);
-    const anim = Animated.timing(progress, { toValue: 1, duration, delay, useNativeDriver: true });
-    anim.start();
-    return () => anim.stop();
-  }, [progress, duration, delay]);
-
   return (
     <Animated.View
-      style={[
-        style,
-        {
-          opacity: progress,
-          transform: [
-            {
-              translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [distance, 0] }),
-            },
-          ],
-        },
-      ]}
+      entering={FadeInDown.duration(duration)
+        .delay(delay)
+        .withInitialValues({ opacity: 0, transform: [{ translateY: 12 }] })
+        .reduceMotion(ReduceMotion.System)}
+      style={style}
     >
       {children}
     </Animated.View>

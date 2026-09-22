@@ -1,210 +1,264 @@
+import { useEffect } from "react";
 import {
   ActivityIndicator,
-  StyleSheet,
-  Text,
+  Pressable,
+  Text as RNText,
   TextInput,
   View,
+  StyleSheet,
+  type PressableProps,
   type StyleProp,
   type TextInputProps,
-  type TextStyle,
+  type TextProps,
   type ViewStyle,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { MotiView } from "moti";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets, type Edge } from "react-native-safe-area-context";
-import { Tappable } from "./Tappable";
-import { formatMoney } from "../format";
-import { useLayout } from "../layout";
-import {
-  colors,
-  ctaGradient,
-  elevation,
-  font,
-  fonts,
-  hitSlop,
-  iconSize,
-  motion,
-  radius,
-  space,
-} from "../theme";
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
+import { Icon, type IconComponent } from "./icons";
+import { colors, hitSlop, iconSize, radius, shadow, space, type } from "../theme";
 
-export function Screen({
-  children,
+/* ───────────────────────── Text ───────────────────────── */
+
+export function Text({ variant = "body", style, ...props }: TextProps & { variant?: keyof typeof type }) {
+  return <RNText style={[type[variant], style]} {...props} />;
+}
+
+/* ───────────────────────── Press ─────────────────────────
+ * Every tappable thing. Layout styles apply to the Pressable itself, so
+ * `flex: 1` and friends behave; pressed state dims and nudges the scale. */
+
+export function Press({
   style,
-  edges = ["top", "bottom"],
-  padded = true,
-}: {
-  children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-  edges?: Edge[];
-  padded?: boolean;
-}) {
-  const insets = useSafeAreaInsets();
-  const { gutter } = useLayout();
+  children,
+  accessibilityRole = "button",
+  ...props
+}: Omit<PressableProps, "style"> & { style?: StyleProp<ViewStyle> }) {
   return (
-    <View
+    <Pressable
+      accessibilityRole={accessibilityRole}
+      style={({ pressed }) => [style, pressed && styles.pressed, props.disabled && styles.disabled]}
+      {...props}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+/* ───────────────────────── Button ───────────────────────── */
+
+const buttonVariants = {
+  primary: { bg: colors.primary, fg: colors.onPrimary, border: "transparent" },
+  accent: { bg: colors.accent, fg: colors.onAccent, border: "transparent" },
+  secondary: { bg: colors.surface, fg: colors.text, border: colors.border },
+  ghost: { bg: "transparent", fg: colors.primary, border: "transparent" },
+} as const;
+
+export function Button({
+  label,
+  onPress,
+  variant = "primary",
+  size = "md",
+  icon: LeadingIcon,
+  loading,
+  disabled,
+  style,
+}: {
+  label: string;
+  onPress?: () => void;
+  variant?: keyof typeof buttonVariants;
+  size?: "sm" | "md" | "lg";
+  icon?: IconComponent;
+  loading?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const v = buttonVariants[variant];
+  return (
+    <Press
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled || loading), busy: Boolean(loading) }}
       style={[
-        styles.screen,
-        {
-          paddingTop: edges.includes("top") ? insets.top : 0,
-          paddingBottom: edges.includes("bottom") ? insets.bottom : 0,
-          paddingLeft: (padded ? gutter : 0) + (edges.includes("left") ? insets.left : 0),
-          paddingRight: (padded ? gutter : 0) + (edges.includes("right") ? insets.right : 0),
-        },
+        styles.button,
+        styles[`button_${size}`],
+        { backgroundColor: v.bg, borderColor: v.border },
+        variant !== "ghost" && variant !== "secondary" && { boxShadow: shadow.card },
         style,
       ]}
     >
-      {children}
-    </View>
+      {loading ? (
+        <ActivityIndicator color={v.fg} size="small" />
+      ) : LeadingIcon ? (
+        <LeadingIcon size={iconSize.md} color={v.fg} weight="bold" />
+      ) : null}
+      <Text variant="bodyStrong" style={[{ color: v.fg }, size === "sm" && styles.buttonTextSm]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Press>
   );
-}
-
-export function ScreenHeader({
-  title,
-  subtitle,
-  onBack,
-  right,
-  style,
-}: {
-  title: string;
-  subtitle?: string;
-  onBack?: () => void;
-  right?: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-}) {
-  return (
-    <View style={[styles.screenHeader, style]}>
-      {onBack ? (
-        <IconButton icon="chevron-back" color={colors.text} onPress={onBack} accessibilityLabel="Go back" />
-      ) : (
-        <View style={styles.screenHeaderSpacer} />
-      )}
-      <View style={styles.screenHeaderTextWrap}>
-        <Text style={styles.screenHeaderTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text style={styles.screenHeaderSubtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-      {right ?? <View style={styles.screenHeaderSpacer} />}
-    </View>
-  );
-}
-
-/** White elevated surface — replaces GlassCard on daylight. */
-export function Surface({
-  children,
-  style,
-  padded = true,
-}: {
-  children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-  padded?: boolean;
-}) {
-  return <View style={[styles.surface, padded && styles.surfacePadded, style]}>{children}</View>;
-}
-
-/** @deprecated prefer Surface */
-export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <Surface style={style}>{children}</Surface>;
-}
-
-export function Label({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
-  return <Text style={[styles.label, style]}>{children}</Text>;
-}
-
-export function Body({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
-  return <Text style={[styles.body, style]}>{children}</Text>;
-}
-
-export function Title({ children, style }: { children: React.ReactNode; style?: StyleProp<TextStyle> }) {
-  return <Text style={[styles.title, style]}>{children}</Text>;
-}
-
-export function Money({
-  amount,
-  currency = "INR",
-  style,
-}: {
-  amount: number;
-  currency?: string;
-  style?: StyleProp<TextStyle>;
-}) {
-  return <Text style={[styles.money, style]}>{formatMoney(amount, currency)}</Text>;
-}
-
-export function SectionHeader({
-  title,
-  icon,
-  style,
-}: {
-  title: string;
-  icon?: keyof typeof Ionicons.glyphMap;
-  style?: StyleProp<ViewStyle>;
-}) {
-  return (
-    <View style={[styles.sectionHeader, style]}>
-      {icon ? <Ionicons name={icon} size={iconSize.sm} color={colors.textFaint} /> : null}
-      <Text style={styles.sectionTitle}>{title}</Text>
-    </View>
-  );
-}
-
-export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.divider, style]} />;
 }
 
 export function IconButton({
-  icon,
+  icon: Glyph,
   onPress,
-  color = colors.text,
-  accessibilityLabel,
+  label,
+  tone = "surface",
+  filled,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconComponent;
   onPress?: () => void;
-  color?: string;
-  accessibilityLabel?: string;
+  label: string;
+  /** "surface" on light backgrounds, "onPrimary" on the blue header band. */
+  tone?: "surface" | "onPrimary";
+  filled?: boolean;
 }) {
+  const onPrimary = tone === "onPrimary";
   return (
-    <Tappable
+    <Press
       onPress={onPress}
-      style={styles.iconBtn}
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={label}
       hitSlop={hitSlop}
+      style={[styles.iconButton, onPrimary ? styles.iconButtonOnPrimary : styles.iconButtonSurface]}
     >
-      <Ionicons name={icon} size={iconSize.md} color={color} />
-    </Tappable>
+      <Glyph
+        size={iconSize.md}
+        color={onPrimary ? colors.onPrimary : filled ? colors.primary : colors.text}
+        weight={filled ? "fill" : "bold"}
+      />
+    </Press>
   );
 }
 
+/* ───────────────────────── Surfaces ───────────────────────── */
+
+export function SectionHeader({
+  title,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text variant="title" accessibilityRole="header" style={styles.flex}>
+        {title}
+      </Text>
+      {actionLabel && onAction ? (
+        <Press onPress={onAction} hitSlop={hitSlop} accessibilityLabel={actionLabel}>
+          <Text variant="subhead" style={styles.link}>
+            {actionLabel}
+          </Text>
+        </Press>
+      ) : null}
+    </View>
+  );
+}
+
+export function Pill({
+  label,
+  color = colors.textMuted,
+  background = colors.surfaceMuted,
+  icon: Glyph,
+}: {
+  label: string;
+  color?: string;
+  background?: string;
+  icon?: IconComponent;
+}) {
+  return (
+    <View style={[styles.pill, { backgroundColor: background }]}>
+      {Glyph ? <Glyph size={14} color={color} weight="bold" /> : null}
+      <Text variant="caption" style={[styles.pillText, { color }]}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+export function Chip({ label, selected, onPress }: { label: string; selected?: boolean; onPress?: () => void }) {
+  return (
+    <Press
+      onPress={onPress}
+      accessibilityState={{ selected: Boolean(selected) }}
+      style={[styles.chip, selected && styles.chipSelected]}
+    >
+      <Text variant="subhead" style={[styles.chipText, selected && styles.chipTextSelected]}>
+        {label}
+      </Text>
+    </Press>
+  );
+}
+
+/* ───────────────────────── Inputs ───────────────────────── */
+
+export function Field({
+  icon: Glyph,
+  style,
+  ref,
+  ...props
+}: TextInputProps & { icon?: IconComponent; ref?: React.Ref<TextInput> }) {
+  return (
+    <View style={[styles.field, style]}>
+      {Glyph ? <Glyph size={iconSize.md} color={colors.textFaint} /> : null}
+      <TextInput ref={ref} placeholderTextColor={colors.textFaint} style={styles.fieldInput} {...props} />
+    </View>
+  );
+}
+
+/* ───────────────────────── States ───────────────────────── */
+
 export function EmptyState({
-  icon = "file-tray-outline",
+  icon: Glyph = Icon.Package,
   title,
   message,
   actionLabel,
   onAction,
-  style,
 }: {
-  icon?: keyof typeof Ionicons.glyphMap;
-  title?: string;
+  icon?: IconComponent;
+  title: string;
   message: string;
   actionLabel?: string;
   onAction?: () => void;
-  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={[styles.empty, style]}>
+    <View style={styles.empty}>
       <View style={styles.emptyIcon}>
-        <Ionicons name={icon} size={iconSize.xl} color={colors.textFaint} />
+        <Glyph size={iconSize.xl} color={colors.primary} weight="duotone" />
       </View>
-      {title ? <Text style={styles.emptyTitle}>{title}</Text> : null}
-      <Text style={styles.emptyText}>{message}</Text>
-      {actionLabel && onAction ? (
-        <PrimaryButton label={actionLabel} onPress={onAction} />
+      <View style={styles.emptyText}>
+        <Text variant="title" style={styles.center}>
+          {title}
+        </Text>
+        <Text variant="subhead" style={styles.center}>
+          {message}
+        </Text>
+      </View>
+      {actionLabel && onAction ? <Button label={actionLabel} onPress={onAction} /> : null}
+    </View>
+  );
+}
+
+export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+      <Icon.WarningCircle size={iconSize.md} color={colors.avoid} weight="fill" />
+      <Text variant="subhead" style={[styles.flex, { color: colors.text }]}>
+        {message}
+      </Text>
+      {onRetry ? (
+        <Press onPress={onRetry} hitSlop={hitSlop} accessibilityLabel="Try again">
+          <Text variant="subhead" style={styles.link}>
+            Retry
+          </Text>
+        </Press>
       ) : null}
     </View>
   );
@@ -212,314 +266,115 @@ export function EmptyState({
 
 export function LoadingState({ label }: { label?: string }) {
   return (
-    <View style={styles.loading}>
-      <ActivityIndicator color={colors.accent} />
-      {label ? <Text style={styles.loadingLabel}>{label}</Text> : null}
+    <View style={styles.loading} accessibilityLabel={label ?? "Loading"}>
+      <ActivityIndicator color={colors.primary} />
+      {label ? <Text variant="subhead">{label}</Text> : null}
     </View>
   );
 }
 
-export function ErrorBanner({
-  message,
-  onRetry,
-  style,
-}: {
-  message: string;
-  onRetry?: () => void;
-  style?: StyleProp<ViewStyle>;
-}) {
-  return (
-    <View style={[styles.errorBanner, style]}>
-      <Ionicons name="alert-circle-outline" size={iconSize.sm} color={colors.avoid} />
-      <Text style={styles.errorText}>{message}</Text>
-      {onRetry ? (
-        <Tappable onPress={onRetry} accessibilityLabel="Retry">
-          <Text style={styles.retryText}>Retry</Text>
-        </Tappable>
-      ) : null}
-    </View>
-  );
-}
-
-export function Field(props: TextInputProps) {
-  return (
-    <TextInput
-      placeholderTextColor={colors.textFaint}
-      {...props}
-      style={[styles.field, props.style]}
-    />
-  );
-}
-
-export function PrimaryButton({
-  label,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  onPress?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Tappable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.btnWrap, disabled && styles.disabled, elevation.soft]}
-      accessibilityLabel={label}
-    >
-      <LinearGradient colors={ctaGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.btn}>
-        <Text style={styles.btnText}>{label}</Text>
-      </LinearGradient>
-    </Tappable>
-  );
-}
-
-export function SecondaryButton({
-  label,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  onPress?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Tappable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.secondaryBtn, disabled && styles.disabled]}
-      accessibilityLabel={label}
-    >
-      <Text style={styles.secondaryText}>{label}</Text>
-    </Tappable>
-  );
-}
-
-export function GhostButton({
-  label,
-  onPress,
-  disabled,
-}: {
-  label: string;
-  onPress?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Tappable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.ghostBtn, disabled && styles.disabled]}
-      accessibilityLabel={label}
-    >
-      <Text style={styles.ghostText}>{label}</Text>
-    </Tappable>
-  );
-}
-
-export function PillButton({
-  label,
-  onPress,
-  active,
-  icon,
-  disabled,
-}: {
-  label: string;
-  onPress?: () => void;
-  active?: boolean;
-  icon?: keyof typeof Ionicons.glyphMap;
-  disabled?: boolean;
-}) {
-  return (
-    <Tappable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.pill, active && styles.pillActive, disabled && styles.disabled]}
-      accessibilityLabel={label}
-    >
-      {icon ? (
-        <Ionicons name={icon} size={iconSize.sm} color={active ? colors.onAccent : colors.textMuted} />
-      ) : null}
-      <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
-    </Tappable>
-  );
-}
-
-export function SheetHeader({
-  eyebrow,
-  title,
-  onClose,
-  closeLabel = "Close",
-}: {
-  eyebrow?: string;
-  title: string;
-  onClose: () => void;
-  closeLabel?: string;
-}) {
-  return (
-    <View style={styles.sheetHeader}>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-        <Text style={styles.sheetTitle} numberOfLines={1}>
-          {title}
-        </Text>
-      </View>
-      <PillButton label={closeLabel} onPress={onClose} active icon="arrow-down" />
-    </View>
-  );
-}
-
-export function TabBar<T extends string>({
-  tabs,
-  value,
-  onChange,
-}: {
-  tabs: { id: T; label: string; icon?: keyof typeof Ionicons.glyphMap; disabled?: boolean }[];
-  value: T;
-  onChange: (id: T) => void;
-}) {
-  return (
-    <View style={styles.tabs}>
-      {tabs.map((t) => (
-        <PillButton
-          key={t.id}
-          label={t.label}
-          icon={t.icon}
-          active={value === t.id}
-          disabled={t.disabled}
-          onPress={() => !t.disabled && onChange(t.id)}
-        />
-      ))}
-    </View>
-  );
-}
-
-export function Stagger({
-  children,
-  index = 0,
-}: {
-  children: React.ReactNode;
-  index?: number;
-}) {
-  return (
-    <MotiView
-      from={{ opacity: 0, translateY: 10 }}
-      animate={{ opacity: 1, translateY: 0 }}
-      transition={{ type: "timing", duration: motion.normal, delay: index * 50 }}
-    >
-      {children}
-    </MotiView>
-  );
+/** Pulsing placeholder block. */
+export function Skeleton({ style }: { style?: StyleProp<ViewStyle> }) {
+  const opacity = useSharedValue(0.5);
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    if (!reduceMotion) opacity.value = withRepeat(withTiming(1, { duration: 700 }), -1, true);
+  }, [opacity, reduceMotion]);
+  const animated = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return <Animated.View style={[styles.skeleton, style, animated]} />;
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  screenHeader: { flexDirection: "row", alignItems: "center", gap: space(3), marginBottom: space(4) },
-  screenHeaderSpacer: { width: space(9), height: space(9) },
-  screenHeaderTextWrap: { flex: 1, minWidth: 0 },
-  screenHeaderTitle: { ...font.h2, fontFamily: fonts.serif, fontSize: 22, color: colors.text },
-  screenHeaderSubtitle: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textMuted, marginTop: space(0.5) },
-  surface: {
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    ...elevation.card,
-  },
-  surfacePadded: { padding: space(4) },
-  label: { ...font.label, color: colors.textMuted, textTransform: "uppercase" },
-  body: { ...font.body, color: colors.text },
-  title: { ...font.h2, color: colors.text },
-  money: { ...font.mono, color: colors.text },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: space(1.5), marginBottom: space(2) },
-  sectionTitle: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: space(2) },
-  iconBtn: {
-    width: space(9),
-    height: space(9),
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  empty: { alignItems: "center", justifyContent: "center", paddingVertical: space(10), gap: space(3), paddingHorizontal: space(4) },
-  emptyIcon: {
-    width: space(16),
-    height: space(16),
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emptyTitle: { ...font.h3, color: colors.text, textAlign: "center" },
-  emptyText: { ...font.body, color: colors.textMuted, textAlign: "center", maxWidth: 280 },
-  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: space(3) },
-  loadingLabel: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted },
-  errorBanner: {
+  flex: { flex: 1 },
+  center: { textAlign: "center" },
+  pressed: { opacity: 0.86, transform: [{ scale: 0.98 }] },
+  disabled: { opacity: 0.45 },
+  link: { color: colors.primary, fontFamily: type.bodyStrong.fontFamily },
+
+  button: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: space(2),
-    padding: space(3),
     borderRadius: radius.md,
-    backgroundColor: colors.avoidSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.avoid,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    paddingHorizontal: space(5),
   },
-  errorText: { flex: 1, ...font.small, fontFamily: fonts.sans, color: colors.avoid },
-  retryText: { ...font.small, fontFamily: fonts.sansBold, color: colors.accent },
-  field: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingHorizontal: space(3.5),
-    paddingVertical: space(3),
-    color: colors.text,
-    ...font.body,
-  },
-  btnWrap: { borderRadius: radius.md, overflow: "hidden" },
-  btn: { paddingVertical: space(3.5), alignItems: "center", borderRadius: radius.md },
-  btnText: { ...font.bodyMedium, fontFamily: fonts.sansBold, color: colors.onAccent },
-  secondaryBtn: {
+  button_sm: { minHeight: 36, paddingHorizontal: space(3), borderRadius: radius.sm },
+  button_md: { minHeight: 48 },
+  button_lg: { minHeight: 56, borderRadius: radius.lg },
+  buttonTextSm: { fontSize: 14 },
+
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
     alignItems: "center",
-    paddingVertical: space(3),
-    paddingHorizontal: space(4),
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+    justifyContent: "center",
   },
-  secondaryText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.accent },
-  ghostBtn: { alignItems: "center", paddingVertical: space(2.5), paddingHorizontal: space(3) },
-  ghostText: { ...font.small, fontFamily: fonts.sansSemiBold, color: colors.textMuted },
-  disabled: { opacity: 0.45 },
+  iconButtonSurface: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  iconButtonOnPrimary: { backgroundColor: "rgba(255,255,255,0.14)" },
+
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: space(3) },
+
   pill: {
     flexDirection: "row",
     alignItems: "center",
+    alignSelf: "flex-start",
     gap: space(1),
-    paddingHorizontal: space(3),
-    paddingVertical: space(2),
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: space(2.5),
+    paddingVertical: space(1),
+    borderRadius: radius.full,
   },
-  pillActive: { backgroundColor: colors.accent },
-  pillText: { ...font.caption, fontFamily: fonts.sansMedium, color: colors.textMuted },
-  pillTextActive: { color: colors.onAccent },
-  sheetHeader: {
+  pillText: { fontFamily: type.bodyStrong.fontFamily },
+
+  chip: {
+    paddingHorizontal: space(4),
+    minHeight: 36,
+    justifyContent: "center",
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { color: colors.text },
+  chipTextSelected: { color: colors.onPrimary },
+
+  field: {
     flexDirection: "row",
     alignItems: "center",
     gap: space(3),
+    minHeight: 52,
     paddingHorizontal: space(4),
-    paddingBottom: space(2),
+    borderRadius: radius.md,
+    borderCurve: "continuous",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  eyebrow: { ...font.monoSm, color: colors.accent, textTransform: "uppercase" },
-  sheetTitle: { fontFamily: fonts.serif, fontSize: 22, lineHeight: 28, color: colors.text },
-  tabs: {
+  fieldInput: { flex: 1, ...type.body, paddingVertical: space(3) },
+
+  empty: { alignItems: "center", gap: space(5), paddingVertical: space(12), paddingHorizontal: space(6) },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primarySoft,
+  },
+  emptyText: { gap: space(2), maxWidth: 300 },
+  errorBanner: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: space(1.5),
-    paddingHorizontal: space(3),
-    paddingBottom: space(2.5),
+    alignItems: "center",
+    gap: space(3),
+    padding: space(4),
+    borderRadius: radius.md,
+    borderCurve: "continuous",
+    backgroundColor: colors.avoidSoft,
   },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: space(3), padding: space(6) },
+  skeleton: { backgroundColor: colors.border, borderRadius: radius.md },
 });
