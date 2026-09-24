@@ -8,8 +8,11 @@ import { AppState } from "react-native";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? "";
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+const usesExampleConfig =
+  supabaseUrl.includes("your-project.supabase.co") ||
+  supabaseAnonKey === "your_supabase_anon_or_publishable_key";
 
-export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && !usesExampleConfig);
 
 /**
  * Encrypts session blobs so they can exceed SecureStore's ~2KB limit:
