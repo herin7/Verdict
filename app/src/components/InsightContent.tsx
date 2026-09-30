@@ -1,75 +1,77 @@
-import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Badge } from "./Badge";
-import { Timeline3D } from "./Timeline3D";
-import { colors, font, fonts, iconSize, space } from "../theme";
+import { StyleSheet, View } from "react-native";
+import { Icon, type IconComponent } from "./icons";
+import { SentimentTimeline } from "./SentimentTimeline";
+import { Pill, Text } from "./ui";
+import { colors, iconSize, space } from "../theme";
 import type { BestInCategory, LongTermScore, ScamDetector, VersionHistory } from "../types";
 
-const verdictColorMap = { better: colors.buy, worse: colors.avoid, same: colors.textMuted } as const;
-const verdictIconMap = {
-  better: "arrow-up-circle" as const,
-  worse: "arrow-down-circle" as const,
-  same: "remove-circle" as const,
-};
-const riskColor = { low: colors.buy, medium: colors.wait, high: colors.avoid } as const;
+const risk = {
+  low: { color: colors.buy, bg: colors.buySoft },
+  medium: { color: colors.wait, bg: colors.waitSoft },
+  high: { color: colors.avoid, bg: colors.avoidSoft },
+} as const;
 
-const competitorIconMap = {
-  better: "arrow-down-circle" as const,
-  worse: "arrow-up-circle" as const,
-  similar: "remove-circle" as const,
-};
-const competitorColorMap = { better: colors.avoid, worse: colors.buy, similar: colors.textMuted } as const;
+function Row({ icon: Glyph, color, title, note }: { icon: IconComponent; color: string; title: string; note: string }) {
+  return (
+    <View style={styles.row}>
+      <Glyph size={iconSize.md} color={color} weight="fill" />
+      <View style={styles.flex}>
+        <Text variant="bodyStrong">{title}</Text>
+        <Text variant="subhead">{note}</Text>
+      </View>
+    </View>
+  );
+}
 
 export function LongTermContent({ data }: { data: LongTermScore }) {
+  const up = data.trend === "improving";
+  const down = data.trend === "declining";
   return (
     <View style={styles.stack}>
-      <View style={styles.statRow}>
-        <Badge
+      <View style={styles.pills}>
+        <Pill
+          label={`Long-term ${Math.round(data.score)}/100`}
+          color={colors.primary}
+          background={colors.primarySoft}
+        />
+        <Pill
           label={data.trend}
-          color={data.trend === "improving" ? colors.buy : data.trend === "declining" ? colors.avoid : colors.accent}
-          icon={data.trend === "improving" ? "trending-up" : data.trend === "declining" ? "trending-down" : "remove"}
+          icon={up ? Icon.TrendUp : down ? Icon.TrendDown : Icon.Minus}
+          color={up ? colors.buy : down ? colors.avoid : colors.textMuted}
+          background={up ? colors.buySoft : down ? colors.avoidSoft : colors.surfaceMuted}
         />
       </View>
-
-      <Timeline3D points={data.timeline} score={data.score} />
-
-      <Text style={styles.summary}>{data.summary}</Text>
+      <SentimentTimeline points={data.timeline} />
+      <Text variant="subhead">{data.summary}</Text>
     </View>
   );
 }
 
 export function VersionHistoryContent({ data }: { data: VersionHistory }) {
-  if (!data.hasPreviousVersion) {
-    return (
-      <View style={styles.gapSm}>
-        <Text style={styles.summary}>{data.summary}</Text>
-      </View>
-    );
-  }
-
+  if (!data.hasPreviousVersion) return <Text variant="subhead">{data.summary}</Text>;
+  const worth = data.worthUpgrading;
   return (
     <View style={styles.stack}>
-      <View style={styles.statRow}>
-        <Text style={styles.prevVersion}>vs {data.previousVersion}</Text>
-        <Badge
-          label={data.worthUpgrading === "yes" ? "Worth upgrading" : data.worthUpgrading === "no" ? "Skip it" : "N/A"}
-          color={data.worthUpgrading === "yes" ? colors.buy : data.worthUpgrading === "no" ? colors.avoid : colors.textMuted}
+      <View style={styles.pills}>
+        <Pill label={`vs ${data.previousVersion}`} />
+        {worth !== "not_applicable" ? (
+          <Pill
+            label={worth === "yes" ? "Worth upgrading" : "Not worth upgrading"}
+            color={worth === "yes" ? colors.buy : colors.avoid}
+            background={worth === "yes" ? colors.buySoft : colors.avoidSoft}
+          />
+        ) : null}
+      </View>
+      {data.changes.map((c, i) => (
+        <Row
+          key={i}
+          icon={c.verdict === "better" ? Icon.CheckCircle : c.verdict === "worse" ? Icon.XCircle : Icon.Minus}
+          color={c.verdict === "better" ? colors.buy : c.verdict === "worse" ? colors.avoid : colors.textFaint}
+          title={c.aspect}
+          note={c.note}
         />
-      </View>
-
-      <View style={styles.gapSm}>
-        {data.changes.map((c, i) => (
-          <View key={i} style={styles.compareRow}>
-            <Ionicons name={verdictIconMap[c.verdict]} size={iconSize.sm} color={verdictColorMap[c.verdict]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.aspectName}>{c.aspect}</Text>
-              <Text style={styles.timelineNote}>{c.note}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <Text style={styles.summary}>{data.summary}</Text>
+      ))}
+      <Text variant="subhead">{data.summary}</Text>
     </View>
   );
 }
@@ -77,26 +79,24 @@ export function VersionHistoryContent({ data }: { data: VersionHistory }) {
 export function ScamDetectorContent({ data }: { data: ScamDetector }) {
   return (
     <View style={styles.stack}>
-      <View style={styles.statRow}>
-        <Badge label={`${data.riskLevel} risk`} color={riskColor[data.riskLevel]} icon="shield-outline" />
-        <Badge label={`counterfeit: ${data.counterfeitRisk}`} color={riskColor[data.counterfeitRisk]} />
-        {data.fakeReviewEstimatePercent != null && (
-          <Text style={styles.fakePercent}>~{data.fakeReviewEstimatePercent}% fake</Text>
-        )}
+      <View style={styles.pills}>
+        <Pill label={`${data.riskLevel} risk`} icon={Icon.ShieldWarning} color={risk[data.riskLevel].color} background={risk[data.riskLevel].bg} />
+        <Pill
+          label={`Counterfeit ${data.counterfeitRisk}`}
+          color={risk[data.counterfeitRisk].color}
+          background={risk[data.counterfeitRisk].bg}
+        />
+        {data.fakeReviewEstimatePercent != null ? <Pill label={`~${data.fakeReviewEstimatePercent}% fake reviews`} /> : null}
       </View>
-
-      {data.redFlags.length > 0 && (
-        <View style={styles.gapXs}>
-          {data.redFlags.map((f, i) => (
-            <View key={i} style={styles.flagRow}>
-              <Ionicons name="alert-circle-outline" size={iconSize.sm} color={colors.avoid} />
-              <Text style={styles.timelineNote}>{f}</Text>
-            </View>
-          ))}
+      {data.redFlags.map((flag, i) => (
+        <View key={i} style={styles.row}>
+          <Icon.Warning size={iconSize.md} color={colors.avoid} weight="fill" />
+          <Text variant="body" style={styles.flex}>
+            {flag}
+          </Text>
         </View>
-      )}
-
-      <Text style={styles.summary}>{data.summary}</Text>
+      ))}
+      <Text variant="subhead">{data.summary}</Text>
     </View>
   );
 }
@@ -104,41 +104,28 @@ export function ScamDetectorContent({ data }: { data: ScamDetector }) {
 export function BestInCategoryContent({ data }: { data: BestInCategory }) {
   return (
     <View style={styles.stack}>
-      <View style={styles.statRow}>
-        <Text style={styles.bigStat}>{data.categoryScore}</Text>
-        <Text style={styles.bigStatUnit}>/100</Text>
-        <Badge label={data.rank} color={colors.accent} icon="trophy-outline" />
+      <View style={styles.pills}>
+        <Pill label={data.rank} icon={Icon.Trophy} color={colors.onAccent} background={colors.accent} />
+        <Pill label={`${data.categoryScore}/100 in category`} />
       </View>
-
-      <View style={styles.gapSm}>
-        {data.competitors.map((c, i) => (
-          <View key={i} style={styles.compareRow}>
-            <Ionicons name={competitorIconMap[c.comparison]} size={iconSize.sm} color={competitorColorMap[c.comparison]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.aspectName}>{c.name}</Text>
-              <Text style={styles.timelineNote}>{c.note}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <Text style={styles.summary}>{data.summary}</Text>
+      {data.competitors.map((c, i) => (
+        <Row
+          key={i}
+          // "better" means the competitor beats this product
+          icon={c.comparison === "better" ? Icon.TrendUp : c.comparison === "worse" ? Icon.TrendDown : Icon.Minus}
+          color={c.comparison === "better" ? colors.avoid : c.comparison === "worse" ? colors.buy : colors.textFaint}
+          title={c.name}
+          note={c.note}
+        />
+      ))}
+      <Text variant="subhead">{data.summary}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   stack: { gap: space(3) },
-  gapSm: { gap: space(2) },
-  gapXs: { gap: space(1.5) },
-  statRow: { flexDirection: "row", alignItems: "center", gap: space(2), flexWrap: "wrap" },
-  bigStat: { fontFamily: fonts.monoBold, color: colors.accent, fontSize: 26, lineHeight: 30 },
-  bigStatUnit: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.textFaint, marginLeft: -space(1) },
-  fakePercent: { ...font.monoSm, fontFamily: fonts.monoBold, color: colors.textMuted },
-  prevVersion: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
-  timelineNote: { ...font.caption, color: colors.textMuted, marginTop: space(0.25), lineHeight: 17 },
-  compareRow: { flexDirection: "row", gap: space(2.5), alignItems: "flex-start" },
-  aspectName: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
-  flagRow: { flexDirection: "row", gap: space(2), alignItems: "flex-start" },
-  summary: { ...font.small, fontFamily: fonts.sans, color: colors.textMuted, lineHeight: 19 },
+  pills: { flexDirection: "row", flexWrap: "wrap", gap: space(2) },
+  row: { flexDirection: "row", gap: space(3), alignItems: "flex-start" },
 });

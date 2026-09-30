@@ -1,30 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LayoutAnimation, Platform, StyleSheet, Text, UIManager, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Tappable } from "./Tappable";
-import { SkeletonRows } from "./Shimmer";
-import { Surface } from "./ui";
-import { colors, font, fonts, iconSize, radius, space } from "../theme";
+import { LayoutAnimation, StyleSheet, View } from "react-native";
+import { Icon, type IconComponent } from "./icons";
+import { Press, Skeleton, Text } from "./ui";
+import { colors, iconSize, radius, shadow, space } from "../theme";
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+type CardState<T> = { status: "idle" | "loading" | "error" } | { status: "loaded"; data: T };
 
-type CardState<T> =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "error" }
-  | { status: "loaded"; data: T };
-
-/** Collapsible card that lazily fetches its data on first expand, with its own skeleton loader and retry. */
+/** Collapsed row that fetches its content on first expand, with its own skeleton and retry. */
 export function InsightCard<T>({
-  icon,
+  icon: Glyph,
   title,
   teaser,
   fetcher,
   renderContent,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconComponent;
   title: string;
   teaser: string;
   fetcher: () => Promise<T>;
@@ -33,12 +23,7 @@ export function InsightCard<T>({
   const [expanded, setExpanded] = useState(false);
   const [state, setState] = useState<CardState<T>>({ status: "idle" });
   const mounted = useRef(true);
-
-  useEffect(() => {
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  useEffect(() => () => void (mounted.current = false), []);
 
   function load() {
     setState({ status: "loading" });
@@ -49,72 +34,72 @@ export function InsightCard<T>({
 
   function toggle() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    const next = !expanded;
-    setExpanded(next);
-    if (next && state.status === "idle") load();
+    setExpanded((e) => !e);
+    if (!expanded && state.status === "idle") load();
   }
 
+  const Chevron = expanded ? Icon.CaretUp : Icon.CaretDown;
   return (
-    <Surface style={styles.card} padded={false}>
-      <Tappable onPress={toggle} style={styles.header} accessibilityLabel={title}>
+    <View style={styles.card}>
+      <Press
+        onPress={toggle}
+        style={styles.header}
+        accessibilityLabel={title}
+        accessibilityHint={teaser}
+        accessibilityState={{ expanded }}
+      >
         <View style={styles.iconWrap}>
-          <Ionicons name={icon} size={iconSize.sm} color={colors.accent} />
+          <Glyph size={iconSize.md} color={colors.primary} weight="duotone" />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{title}</Text>
-          {!expanded && (
-            <Text style={styles.teaser} numberOfLines={1}>
+        <View style={styles.text}>
+          <Text variant="bodyStrong">{title}</Text>
+          {!expanded ? (
+            <Text variant="caption" numberOfLines={1}>
               {teaser}
             </Text>
-          )}
+          ) : null}
         </View>
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={iconSize.sm}
-          color={colors.textFaint}
-        />
-      </Tappable>
+        <Chevron size={iconSize.sm} color={colors.textFaint} weight="bold" />
+      </Press>
 
-      {expanded && (
+      {expanded ? (
         <View style={styles.body}>
-          {state.status === "loading" && <SkeletonRows />}
-          {state.status === "error" && (
-            <Tappable onPress={load} style={styles.errorRow} accessibilityLabel="Retry">
-              <Ionicons name="refresh-outline" size={iconSize.sm} color={colors.avoid} />
-              <Text style={styles.errorText}>Couldn't load this - tap to retry</Text>
-            </Tappable>
-          )}
-          {state.status === "loaded" && renderContent(state.data)}
+          {state.status === "loading" ? (
+            <View style={styles.skeletons}>
+              <Skeleton style={styles.line} />
+              <Skeleton style={[styles.line, { width: "80%" }]} />
+              <Skeleton style={[styles.line, { width: "60%" }]} />
+            </View>
+          ) : null}
+          {state.status === "error" ? (
+            <Press onPress={load} style={styles.retry} accessibilityLabel="Retry">
+              <Icon.ArrowClockwise size={iconSize.sm} color={colors.avoid} weight="bold" />
+              <Text variant="subhead" style={{ color: colors.avoid }}>
+                Couldn't load this. Tap to retry.
+              </Text>
+            </Press>
+          ) : null}
+          {state.status === "loaded" ? renderContent(state.data) : null}
         </View>
-      )}
-    </Surface>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { overflow: "hidden" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space(3),
-    padding: space(4),
-  },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, borderCurve: "continuous", boxShadow: shadow.card },
+  header: { flexDirection: "row", alignItems: "center", gap: space(3), padding: space(4), minHeight: 64 },
   iconWrap: {
-    width: space(8.5),
-    height: space(8.5),
+    width: 40,
+    height: 40,
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.primarySoft,
   },
-  title: { ...font.small, fontFamily: fonts.sansBold, color: colors.text },
-  teaser: { ...font.caption, color: colors.textMuted, marginTop: space(0.5) },
-  body: {
-    paddingHorizontal: space(4),
-    paddingBottom: space(4),
-    paddingTop: space(0.5),
-    gap: space(2.5),
-  },
-  errorRow: { flexDirection: "row", alignItems: "center", gap: space(1.5), paddingVertical: space(1) },
-  errorText: { ...font.caption, fontFamily: fonts.sansSemiBold, color: colors.avoid },
+  text: { flex: 1, gap: space(0.5) },
+  body: { paddingHorizontal: space(4), paddingBottom: space(4), gap: space(3) },
+  skeletons: { gap: space(2) },
+  line: { height: 12, width: "100%" },
+  retry: { flexDirection: "row", alignItems: "center", gap: space(2), paddingVertical: space(2) },
 });

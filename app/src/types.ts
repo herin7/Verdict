@@ -13,52 +13,31 @@ export interface ReportSource {
   type: string;
 }
 
-export interface BuyLink {
-  retailer: string;
-  retailerId?: string;
-  url: string;
-  title: string;
-  amount: number | null;
-  currency: string | null;
-  /** @deprecated legacy string prices — prefer amount */
-  price?: string | null;
+/** A claim plus the 1-based numbers of the sources that back it. */
+export interface CitedPoint {
+  text: string;
+  sources: number[];
 }
 
+export type Verdict = "buy" | "skip" | "depends";
+
+/** The evidence-backed verdict (server schemaVersion 3). */
 export interface ConsensusReport {
-  verdict: "buy" | "wait" | "avoid" | "mixed";
+  schemaVersion: 3;
+  verdict: Verdict;
   verdictLine: string;
-  score: number;
-  consensus: string;
-  pros: string[];
-  complaints: string[];
-  longTermIssues: string[];
-  commonFailures: string[];
-  fakeReviewSignal: { level: "low" | "medium" | "high" | "unknown"; note: string };
-  priceAnalysis: {
-    summary: string;
-    trend: "rising" | "falling" | "stable" | "unknown";
-    shouldWaitForSale: boolean;
-    reason: string;
-  };
+  summary: string;
+  bestFor: string[];
+  notFor: string[];
+  keySpecs: { label: string; value: string }[];
+  pros: CitedPoint[];
+  cons: CitedPoint[];
+  recurringIssues: (CitedPoint & { frequency: "common" | "occasional" | "rare" })[];
+  risks: (CitedPoint & { severity: "low" | "medium" | "high" })[];
+  fakeReviewRisk: { level: "low" | "medium" | "high" | "unknown"; note: string };
   alternatives: { name: string; why: string }[];
   buyingAdvice: string;
   sources: ReportSource[];
-}
-
-export interface SavedReport {
-  id: string;
-  savedAt: number;
-  product: ProductIdentity;
-  report: ConsensusReport;
-  buyLinks: BuyLink[];
-  productId?: string | null;
-  referencePrice?: ReferencePrice | null;
-  /** ASIN / FSN from identify-screen for direct marketplace fetch. */
-  productIds?: {
-    asin?: string | null;
-    fsn?: string | null;
-    flipkartItemId?: string | null;
-  } | null;
 }
 
 // --- Deep-dive insights (fetched lazily, one endpoint call per card) -------
@@ -93,73 +72,4 @@ export interface BestInCategory {
   categoryScore: number;
   competitors: { name: string; comparison: "better" | "worse" | "similar"; note: string }[];
   summary: string;
-}
-
-export interface MarketplaceOffer {
-  retailer: string;
-  retailerId: string;
-  url: string;
-  title: string;
-  price: number | null;
-  currency: string;
-  priceRaw: string | null;
-  shipping: string | null;
-  deliveryEstimate: string | null;
-  inStock: boolean | null;
-  seller: string | null;
-  coupons: string[];
-  matchScore: number;
-  matchReason: string;
-  /** True for deeplinkOnly platforms (e.g. Zepto, Milkbasket) - no live price was
-   *  fetched; url is a "check manually" link to the platform's app/website. */
-  checkManually?: boolean;
-  /** True when this is the same listing the user is already viewing - price is
-   *  forced to the live on-screen reference price, never a re-scrape. */
-  isCurrentListing?: boolean;
-}
-
-/** The price already on the user's current screen - the authoritative baseline
- *  for compare/deals. See server/src/marketplaces/normalize.ts ReferencePrice. */
-export interface ReferencePrice {
-  amount: number;
-  currency: string;
-  retailerId?: string | null;
-}
-
-export type PaymentMethodId =
-  | "hdfc_cc"
-  | "sbi_cc"
-  | "icici_cc"
-  | "axis_cc"
-  | "amex"
-  | "amazon_pay"
-  | "flipkart_axis"
-  | "gpay"
-  | "phonepe"
-  | "paytm"
-  | "cred"
-  | "amazon_prime"
-  | "flipkart_plus";
-
-export interface PaymentCatalogItem {
-  id: PaymentMethodId;
-  label: string;
-  kind: "card" | "wallet" | "membership";
-}
-
-export interface AppliedDeal {
-  ruleId: string;
-  label: string;
-  method: PaymentMethodId;
-  savings: number;
-}
-
-export interface RankedDeal {
-  offer: MarketplaceOffer;
-  listPrice: number;
-  finalPayable: number;
-  totalSavings: number;
-  applied: AppliedDeal[];
-  methodUsed: PaymentMethodId | null;
-  verifiedDeal: boolean;
 }
