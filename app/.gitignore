@@ -10,3 +10,4 @@ android/local.properties
 modules/*/android/build
 modules/*/android/.cxx
 modules/*/android/.gradle
+google-services.json

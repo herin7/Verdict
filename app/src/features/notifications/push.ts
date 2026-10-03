@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
@@ -43,7 +43,10 @@ export function itemIdFromUrl(url: unknown): string | null {
   return typeof url === "string" ? (url.match(/item\/([^/?#]+)/)?.[1] ?? null) : null;
 }
 
-/** Opens the item a tapped notification points at, including the one that cold-started the app. */
+/**
+ * Opens the item a tapped notification points at (including the one that
+ * cold-started the app) and keeps this device registered for pushes.
+ */
 export function usePushNavigation() {
   const router = useRouter();
   useEffect(() => {
@@ -52,8 +55,15 @@ export function usePushNavigation() {
       if (id) router.push(`/item/${id}`);
     };
     Notifications.getLastNotificationResponseAsync().then(open).catch(() => {});
-    registerForPush({ ask: false }).catch(() => {});
+    // Registering is an idempotent upsert, so redo it on every foreground: one
+    // failed attempt (offline at launch, DNS hiccup) must not cost all future pushes.
+    const register = () => registerForPush({ ask: false }).catch(() => {});
+    register();
+    const appState = AppState.addEventListener("change", (state) => state === "active" && register());
     const sub = Notifications.addNotificationResponseReceivedListener(open);
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      appState.remove();
+    };
   }, [router]);
 }

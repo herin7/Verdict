@@ -239,24 +239,114 @@ function deterministicFromHtml(url: string, html: string): PartialIdentity {
   };
 }
 
+/**
+ * Names that come from a blocked, bot-check or ad page instead of the product:
+ * a bare domain ("veirdo.in", "aax-eu.amazon-adsystem.com") or a generic title.
+ */
+export function isJunkProductName(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim();
+  if (n.length < 3) return true;
+  if (/^(https?:\/\/)?[\w-]+(\.[\w-]+)+\/?$/i.test(n)) return true;
+  return /^(amazon(\.\w+)*|flipkart|myntra|robot check|access denied|page not found|404|sign in|just a moment\.*|attention required.*)$/i.test(n);
+}
+
 function isSufficient(partial: PartialIdentity): boolean {
-  return Boolean(partial.name && partial.name.length >= 3 && (partial.confidence ?? 0) >= 0.55);
+  return Boolean(partial.name && !isJunkProductName(partial.name) && (partial.confidence ?? 0) >= 0.55);
+}
+
+/**
+ * Follows short share links (amzn.in/d/..., dl.flipkart.com/s/..., share.google/...)
+ * to the real product URL, keeping the page HTML as a fallback source when the
+ * scraper is blocked.
+ */
+async function fetchDirect(url: string): Promise<{ url: string; html: string | null }> {
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(6000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36",
+        "Accept-Language": "en-IN,en;q=0.9",
+        Accept: "text/html",
+      },
+    });
+    const isHtml = res.ok && (res.headers.get("content-type") ?? "").includes("text/html");
+    return { url: res.url || url, html: isHtml ? await res.text() : (await res.body?.cancel(), null) };
+  } catch {
+    return { url, html: null };
+  }
+}
+
+/** "Amazon.in: Buy Logitech PRO X2 ... : Amazon.in: Electronics" gives "Logitech PRO X2 ...". */
+export function cleanStoreTitle(title: string): string {
+  return title
+    .replace(/^(amazon\.\w+(\.\w+)?|flipkart(\.com)?)\s*:\s*(buy\s+)?/i, "")
+    .replace(/\s*[:|-]\s*(amazon|flipkart|myntra)\b.*$/i, "")
+    .replace(/\s+(online at (best|low) prices?.*|buy online.*)$/i, "")
+    .trim();
+}
+
+/** amazon.in/Boat-Rockerz-450-Bluetooth-Headphones/dp/B07... gives "Boat Rockerz 450 Bluetooth Headphones". */
+export function nameFromUrlSlug(url: string): string | null {
+  const slug =
+    url.match(/\/([^/?#]{8,})\/(?:dp|p|gp\/product)\/[\w-]+/i)?.[1] ?? // amazon, flipkart
+    url.match(/\/products\/([^/?#]{8,})/i)?.[1]; // shopify stores
+  if (!slug) return null;
+  const name = decodeURIComponent(slug).replace(/[-_+]+/g, " ").trim();
+  return name.split(" ").length >= 2 ? name : null;
+}
+
+/** Store boilerplate off the name; the search term keeps only the core product ("X, with Y, ..." gives "X"). */
+function withCleanName(partial: PartialIdentity): PartialIdentity {
+  if (!partial.name) return partial;
+  const name = cleanStoreTitle(partial.name);
+  const searchTerm = name.split(/,|\s[|(]|\swith\s/i)[0].trim().slice(0, 100) || name;
+  return { ...partial, name, searchTerm };
+}
+
+function deterministicResult(partial: PartialIdentity, url: string, marketplaceId: string | null): UrlIdentifyResult {
+  const product = requireProductIdentity(
+    coerceToSchema(ProductIdentitySchema, {
+      name: partial.name,
+      brand: partial.brand ?? null,
+      category: partial.category ?? "general",
+      model: partial.model ?? null,
+      confidence: partial.confidence ?? 0.7,
+      searchTerm: partial.searchTerm || partial.name,
+    })
+  );
+  const structured = { gtin: partial.gtin ?? null, price: partial.price ?? null, currency: partial.currency ?? null, marketplaceId };
+  return { product, sourceUrl: url, marketplaceId, method: "deterministic", structured };
 }
 
 /**
  * Identify product from marketplace URL. Deterministic metadata/JSON-LD first;
  * LLM only if extraction is insufficient.
  */
-export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
+export async function identifyFromUrl(sharedUrl: string): Promise<UrlIdentifyResult> {
+  const direct = await fetchDirect(sharedUrl);
+  const url = direct.url;
   const marketplace = findMarketplace(url);
 
-  const [html, structured] = await Promise.all([fetchHtml(url), orchestratedExtract(url)]);
+  // Fast path: most store pages name the product in their own HTML, so the
+  // scraper (~15 s) is only needed when that page is blocked or unhelpful.
+  if (direct.html) {
+    const quick = withCleanName(deterministicFromHtml(url, direct.html));
+    if (isSufficient(quick)) return deterministicResult(quick, url, marketplace?.id ?? null);
+  }
+
+  const [scraperHtml, structured] = await Promise.all([fetchHtml(url), orchestratedExtract(url)]);
+  const html = scraperHtml ?? direct.html;
 
   const scraped = await orchestratedScrape([url], { oneTimeoutMs: 12000 });
   const page: ScrapedPage | undefined = scraped.get(url);
 
   let partial: PartialIdentity = {};
   if (html) partial = { ...partial, ...deterministicFromHtml(url, html) };
+  if (isJunkProductName(partial.name) && direct.html && direct.html !== html) {
+    partial = { ...partial, ...deterministicFromHtml(url, direct.html) };
+  }
+  partial = withCleanName(partial);
 
   if (structured) {
     const fromExtract = validatedPrice(structured.price, structured.currency);
@@ -272,6 +362,13 @@ export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
       currency: partial.currency || fromExtract.currency || null,
     };
   }
+
+  // A blocked page gives a junk title; the product URL's slug is more reliable.
+  const slugName = nameFromUrlSlug(url);
+  if (slugName && (!partial.name || isJunkProductName(partial.name))) {
+    partial = { ...partial, name: slugName, searchTerm: slugName, confidence: Math.max(partial.confidence ?? 0, 0.7) };
+  }
+  if (isJunkProductName(partial.name)) partial = { ...partial, name: undefined };
 
   if (!partial.name && page?.markdown) {
     const firstLine = page.markdown.split("\n").find((l) => l.trim().length > 8);
@@ -289,27 +386,9 @@ export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
     marketplaceId: marketplace?.id ?? null,
   };
 
-  if (isSufficient(partial)) {
-    const product = requireProductIdentity(
-      coerceToSchema(ProductIdentitySchema, {
-        name: partial.name,
-        brand: partial.brand ?? null,
-        category: partial.category ?? "general",
-        model: partial.model ?? null,
-        confidence: partial.confidence ?? 0.7,
-        searchTerm: partial.searchTerm || partial.name,
-      })
-    );
-    return {
-      product,
-      sourceUrl: url,
-      marketplaceId: marketplace?.id ?? null,
-      method: "deterministic",
-      structured: structuredOut,
-    };
-  }
+  if (isSufficient(partial)) return deterministicResult(partial, url, marketplace?.id ?? null);
 
-  const product = await callToolIdentifyFromText({
+  const llmProduct = await callToolIdentifyFromText({
     url,
     title: partial.name ?? null,
     brand: typeof partial.brand === "string" ? partial.brand : null,
@@ -317,6 +396,8 @@ export async function identifyFromUrl(url: string): Promise<UrlIdentifyResult> {
     description: partial.description ?? null,
     gtin: typeof partial.gtin === "string" ? partial.gtin : null,
   });
+  // The model can still echo a domain from a blocked page; treat that as "not identified".
+  const product = isJunkProductName(llmProduct.name) ? { ...llmProduct, confidence: 0 } : llmProduct;
 
   return {
     product,

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { logger } from "../logging/logger.js";
-import { identifyFromUrl } from "../identify/fromUrl.js";
+import { identifyFromUrl, isJunkProductName } from "../identify/fromUrl.js";
 import { callToolIdentifyFromQuery, callToolIdentifyFromScreenshot } from "../identify/llmFallback.js";
 import { researchProduct } from "../services/research.js";
 import { normalizeCountry } from "../marketplaces/registry.js";
@@ -92,7 +92,7 @@ export async function processShare(shareId: string): Promise<void> {
 async function identify(share: ShareRow, shareId: string): Promise<ProductIdentity> {
   if (share.kind === "url" && share.inputUrl) {
     const result = await identifyFromUrl(share.inputUrl).catch(() => null);
-    if (result && result.product.confidence >= MIN_CONFIDENCE) return result.product;
+    if (result && result.product.confidence >= MIN_CONFIDENCE && !isJunkProductName(result.product.name)) return result.product;
     // Unreadable page: fall through to whatever text came with the link.
   }
 
@@ -105,7 +105,9 @@ async function identify(share: ShareRow, shareId: string): Promise<ProductIdenti
 
   const product =
     share.kind === "image" ? await callToolIdentifyFromScreenshot(text) : await callToolIdentifyFromQuery(text.slice(0, 200));
-  if (product.confidence < MIN_CONFIDENCE) throw new NeedsInput("We couldn't tell which product this is.");
+  if (product.confidence < MIN_CONFIDENCE || isJunkProductName(product.name)) {
+    throw new NeedsInput("We couldn't tell which product this is.");
+  }
   return product;
 }
 
