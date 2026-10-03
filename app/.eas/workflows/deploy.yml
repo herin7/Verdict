@@ -38,3 +38,16 @@ jobs:
       platform: android
       channel: production
       message: ${{ github.commit_message }}
+
+  # Internal test APKs (preview profile) listen on their own channel; give them the
+  # same JS fix. Builds whose native fingerprint differs ignore it automatically.
+  publish_update_preview:
+    name: Publish OTA update to test builds
+    needs: [get_build]
+    if: ${{ needs.get_build.outputs.build_id }}
+    type: update
+    environment: preview
+    params:
+      platform: android
+      channel: preview
+      message: ${{ github.commit_message }}
