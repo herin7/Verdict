@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Stack } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
 import { ThemeProvider, DarkTheme, DefaultTheme } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -12,7 +12,7 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from "@expo-google-fonts/plus-jakarta-sans";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { ShareIntentProvider } from "expo-share-intent";
+import { ShareIntentProvider, useShareIntentContext } from "expo-share-intent";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SessionProvider, useSession } from "@/features/auth/session";
@@ -106,6 +106,7 @@ function RootNavigator() {
       {signedIn && session.user ? (
         <InboxProvider key={session.user} user={session.user}>
           <PushNavigation />
+          <ShareNavigation />
           {stack}
         </InboxProvider>
       ) : (
@@ -113,6 +114,22 @@ function RootNavigator() {
       )}
     </>
   );
+}
+
+/**
+ * Share sheet → /incoming. On Android the shared text/image arrives through
+ * expo-share-intent's state (there is no URL for +native-intent to rewrite),
+ * on a cold start and when the app was already open alike. Only mounted while
+ * signed in.
+ */
+function ShareNavigation() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { hasShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (hasShareIntent && pathname !== "/incoming") router.push("/incoming");
+  }, [hasShareIntent, pathname, router]);
+  return null;
 }
 
 /** Push taps → item screen. Only mounted while signed in. */
