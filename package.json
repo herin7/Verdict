@@ -1,0 +1,18 @@
+{
+  "name": "verdict",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Verdict mobile client and decision-engine API",
+  "scripts": {
+    "dev:app": "npm --prefix app run start",
+    "dev:api": "npm --prefix server run dev",
+    "build": "npm --prefix server run build",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix app run typecheck",
+    "test": "npm --prefix server test && npm --prefix app test",
+    "audit:runtime": "npm --prefix server audit --omit=dev --audit-level=high",
+    "verify": "npm run typecheck && npm run test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
