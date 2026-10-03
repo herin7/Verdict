@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  fingerprint:
+    name: Fingerprint native code
+    type: fingerprint
+    environment: production
+
+  get_build:
+    name: Find build with same native code
+    needs: [fingerprint]
+    type: get-build
+    params:
+      platform: android
+      profile: production
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+
+  build_android:
+    name: Build Android (native changed)
+    needs: [get_build]
+    if: ${{ !needs.get_build.outputs.build_id }}
+    type: build
+    params:
+      platform: android
+      profile: production
+
+  publish_update:
+    name: Publish OTA update (JS only)
+    needs: [get_build]
+    if: ${{ needs.get_build.outputs.build_id }}
+    type: update
+    environment: production
+    params:
+      platform: android
+      channel: production
+      message: ${{ github.commit_message }}

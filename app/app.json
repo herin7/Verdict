@@ -20,7 +20,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "runtimeVersion": {
-        "policy": "appVersion"
+        "policy": "fingerprint"
       }
     },
     "plugins": [
