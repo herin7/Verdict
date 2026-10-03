@@ -15,6 +15,12 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://en2dt3moxtzkwjbfpr7v7zgtti0ynhkw.lambda-url.ap-south-1.on.aws",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://eryhzoacgygbxkdgmsfb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_VJ_KK7g_-hvyoV9aH4b7PA_BqU5Wn5a",
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
       }
     },
     "production": {
