@@ -14,6 +14,10 @@
     "prebuild:android": "expo prebuild --platform android",
     "run:android": "expo run:android",
     "eas:dev": "eas build --profile development --platform android",
+    "build:preview": "eas build --profile preview --platform android",
+    "build:prod": "eas build --profile production --platform android",
+    "update:preview": "eas update --channel preview --platform android --auto",
+    "update:prod": "eas update --channel production --platform android --auto",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\""
   },
@@ -41,6 +45,7 @@
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
+    "expo-updates": "~57.0.24",
     "expo-web-browser": "~57.0.3",
     "phosphor-react-native": "^3.0.6",
     "posthog-react-native": "^4.56.0",

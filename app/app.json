@@ -18,7 +18,10 @@
         "monochromeImage": "./assets/monochrome-icon.png",
         "backgroundColor": "#1F3BD6"
       },
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "plugins": [
       "expo-font",
@@ -81,6 +84,9 @@
         "projectId": "fcae8544-9bd7-490b-9410-f5c12dbafb2b"
       },
       "router": {}
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fcae8544-9bd7-490b-9410-f5c12dbafb2b"
     }
   }
 }
