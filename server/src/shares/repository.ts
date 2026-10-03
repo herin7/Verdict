@@ -2,6 +2,7 @@ import { and, desc, eq, gt, gte, inArray } from "drizzle-orm";
 import { getDb, withDbRetry } from "../db/client.js";
 import { reports, shares } from "../db/schema.js";
 import type { ProductIdentity } from "../schema.js";
+import type { PersonalVerdict } from "../profile/personalize.js";
 import type { ShareKind, ShareStatus } from "./types.js";
 
 export type ShareRow = typeof shares.$inferSelect;
@@ -77,6 +78,7 @@ export async function updateShare(
     extractedText: string | null;
     product: ProductIdentity | null;
     productId: string | null;
+    personal: PersonalVerdict | null;
     error: string | null;
     attempts: number;
     timings: Record<string, number>;

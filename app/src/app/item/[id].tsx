@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { Button, ErrorBanner, Field, IconButton, LoadingState, Text } from "@/components/ui";
 import { useInbox } from "@/features/inbox/inbox";
 import { itemTitle, type InboxItem } from "@/features/inbox/types";
+import { CalibrationCard } from "@/features/profile/CalibrationCard";
 import { ReportView } from "@/features/report/ReportView";
 import { colors, radius, space, verdictLabel } from "@/theme";
 
@@ -14,7 +15,8 @@ const STEPS = [
   "Working out the product",
   "Finding reviews and owner reports",
   "Reading what owners say",
-  "Writing your verdict",
+  "Writing the verdict",
+  "Matching it to your priorities",
 ];
 
 /**
@@ -27,6 +29,7 @@ function currentStep(item: InboxItem): number {
   if (!share || share.status === "queued") return 0;
   if (share.status === "identifying") return 1;
   const stage = share.stage?.toLowerCase() ?? "";
+  if (/match|priorit/.test(stage)) return 5;
   if (/writ|verdict|summar/.test(stage)) return 4;
   if (/read|owner|analy/.test(stage)) return 3;
   return 2;
@@ -48,6 +51,7 @@ export default function ItemScreen() {
   const share = item.server;
   if (share?.status === "ready" && share.report) {
     const report = share.report;
+    const personal = share.personal;
     const product = share.product ?? {
       name: itemTitle(item),
       brand: null,
@@ -65,13 +69,17 @@ export default function ItemScreen() {
                 icon={Icon.ShareNetwork}
                 label="Share verdict"
                 onPress={() =>
-                  void Share.share({ message: `${product.name}: ${verdictLabel[report.verdict]}. ${report.verdictLine}` })
+                  void Share.share({
+                    message: personal
+                      ? `${product.name}: ${verdictLabel[personal.verdict]} for me. ${personal.headline}`
+                      : `${product.name}: ${verdictLabel[report.verdict]}. ${report.verdictLine}`,
+                  })
                 }
               />
             ),
           }}
         />
-        <ReportView product={product} report={report} />
+        <ReportView product={product} report={report} personal={personal} footer={<CalibrationCard />} />
       </>
     );
   }

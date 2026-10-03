@@ -35,6 +35,7 @@ async function present(rows: ShareRow[]) {
         imageUrl: r.imageKey ? await imageUrl(r.imageKey).catch(() => null) : null,
         product: r.product,
         report: parsed?.success ? parsed.data : null,
+        personal: r.personal,
         error: r.error,
         createdAt: r.createdAt.getTime(),
         updatedAt: r.updatedAt.getTime(),
@@ -107,6 +108,7 @@ export async function sharesRoute(app: FastifyInstance) {
       stage: null,
       error: null,
       attempts: 0,
+      personal: null,
       // A typed product name replaces whatever we failed to read.
       ...(body.data.product ? { product: null, extractedText: body.data.product, inputText: body.data.product } : {}),
     });

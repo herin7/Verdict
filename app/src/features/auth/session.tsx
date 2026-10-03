@@ -1,22 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from "react";
 import { supabase, supabaseConfigured } from "../../lib/supabase";
 import { identify as identifyAnalytics, resetAnalytics, track } from "../../analytics/posthog";
-import { getOnboardingDone, setOnboardingDone } from "../../storage";
+import type { BuyerProfile } from "../profile/questions";
+import { readProfile, uploadProfile, writeProfile } from "../profile/store";
 
 /**
  * Who is signed in. Supabase owns real sessions (tokens live in SecureStore via
- * lib/supabase).
+ * lib/supabase). Onboarding is done once there is a buyer profile; it is
+ * answered before sign-in, then pushed to the server whenever someone signs in.
  */
 function useSessionState() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<string | null>(null);
-  const [onboarded, setOnboarded] = useState(false);
+  const [profile, setProfile] = useState<BuyerProfile | null>(null);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
     (async () => {
-      setOnboarded(await getOnboardingDone());
+      setProfile(await readProfile());
       let initialUser: string | null = null;
 
       if (supabaseConfigured && supabase) {
@@ -39,6 +41,13 @@ function useSessionState() {
     if (user) identifyAnalytics(user);
   }, [user]);
 
+  // Every sign-in/launch re-sends the device copy, so an offline save catches up.
+  // ponytail: last-write-wins from this device; pull GET /profile first if profiles ever get edited elsewhere.
+  useEffect(() => {
+    if (user && profile) uploadProfile(profile).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const signIn = useCallback(async (email: string) => {
     setUser(email);
   }, []);
@@ -50,13 +59,25 @@ function useSessionState() {
     setUser(null);
   }, []);
 
-  const completeOnboarding = useCallback(async () => {
-    await setOnboardingDone();
-    track("onboarding_completed");
-    setOnboarded(true);
-  }, []);
+  /** Onboarding, a retake, or a calibration answer. Device first, then the server if signed in. */
+  const saveProfile = useCallback(
+    async (next: BuyerProfile) => {
+      await writeProfile(next);
+      setProfile(next);
+      if (user) await uploadProfile(next).catch(() => {});
+    },
+    [user]
+  );
 
-  return { ready, user, onboarded, signIn, signOut, completeOnboarding };
+  const completeOnboarding = useCallback(
+    async (next: BuyerProfile) => {
+      await saveProfile(next);
+      track("onboarding_completed", { spendStyle: next.spendStyle, friction: next.friction });
+    },
+    [saveProfile]
+  );
+
+  return { ready, user, profile, onboarded: Boolean(profile), signIn, signOut, saveProfile, completeOnboarding };
 }
 
 const SessionContext = createContext<ReturnType<typeof useSessionState> | null>(null);

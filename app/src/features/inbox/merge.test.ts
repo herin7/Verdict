@@ -15,6 +15,7 @@ const share = (over: Partial<ServerShare>): ServerShare => ({
   imageUrl: null,
   product: null,
   report: null,
+  personal: null,
   error: null,
   createdAt: 100,
   updatedAt: 100,

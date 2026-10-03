@@ -142,6 +142,8 @@ export const shares = pgTable(
     extractedText: text("extracted_text"),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     product: jsonb("product"),
+    /** This user's verdict: the shared report weighed against their buyer profile. Null without a profile. */
+    personal: jsonb("personal"),
     error: text("error"),
     attempts: integer("attempts").notNull().default(0),
     /** Milliseconds spent per stage, for latency profiling. */
@@ -156,6 +158,13 @@ export const shares = pgTable(
     index("shares_user_hash_idx").on(t.userId, t.contentHash),
   ]
 );
+
+/** Onboarding answers (plus later calibration), one row per user. See profile/schema.ts. */
+export const buyerProfiles = pgTable("buyer_profiles", {
+  userId: text("user_id").primaryKey(),
+  profile: jsonb("profile").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 /** Expo push tokens, one row per installed app. */
 export const devices = pgTable("devices", {

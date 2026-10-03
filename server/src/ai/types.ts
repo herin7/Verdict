@@ -9,7 +9,8 @@ export type Workload =
   | "insight_long_term"
   | "insight_version"
   | "insight_scam"
-  | "insight_best_in_category";
+  | "insight_best_in_category"
+  | "personalize";
 
 /** Provider-agnostic mirror of Anthropic.Tool / Bedrock Converse toolConfig - name + description + JSON schema. */
 export interface ToolSpec {

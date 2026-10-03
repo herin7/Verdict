@@ -94,6 +94,8 @@ function RootNavigator() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="item/[id]" options={{ title: "" }} />
         <Stack.Screen name="incoming" options={{ headerShown: false, animation: "fade" }} />
+        <Stack.Screen name="profile" options={{ title: "You" }} />
+        <Stack.Screen name="retake" options={{ headerShown: false, presentation: "fullScreenModal" }} />
       </Stack.Protected>
     </Stack>
   );

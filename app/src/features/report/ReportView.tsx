@@ -14,7 +14,8 @@ import {
 import { Pill, Press, Text } from "../../components/ui";
 import { openLink } from "../../lib/links";
 import { colors, fonts, radius, space, verdictColor, verdictLabel, verdictSoft } from "../../theme";
-import type { ConsensusReport, ProductIdentity } from "../../types";
+import type { ConsensusReport, PersonalVerdict, ProductIdentity } from "../../types";
+import { factorLabel } from "../profile/questions";
 import { AlternativesSection } from "./AlternativesSection";
 import { CollapsibleSection, EvidenceList, ReportSection } from "./ReportSection";
 
@@ -27,21 +28,70 @@ const level = {
 
 const frequencyColor = { common: colors.avoid, occasional: colors.wait, rare: colors.textMuted } as const;
 
-/** The finished verdict, top to bottom in the order a shopper asks the questions. */
-export function ReportView({ product, report }: { product: ProductIdentity; report: ConsensusReport }) {
+/**
+ * The finished verdict, top to bottom in the order a shopper asks the questions.
+ * With a personal verdict, the hero is *their* answer and the general one sits
+ * beneath it, followed by the evidence that decided it for them.
+ */
+export function ReportView({
+  product,
+  report,
+  personal,
+  footer,
+}: {
+  product: ProductIdentity;
+  report: ConsensusReport;
+  personal?: PersonalVerdict | null;
+  footer?: React.ReactNode;
+}) {
   const insets = useSafeAreaInsets();
-  const tint = verdictColor[report.verdict];
+  const verdict = personal?.verdict ?? report.verdict;
+  const tint = verdictColor[verdict];
 
   return (
     <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + space(8) }]}>
       <FadeIn style={styles.hero}>
         <Text variant="subhead">{product.brand ? `${product.brand} · ${product.category}` : product.category}</Text>
         <Text variant="display">{product.name}</Text>
-        <View style={[styles.verdictBox, { backgroundColor: verdictSoft[report.verdict] }]}>
-          <Text style={[styles.verdictWord, { color: tint }]}>{verdictLabel[report.verdict]}</Text>
-          <Text variant="bodyStrong">{report.verdictLine}</Text>
+        <View style={[styles.verdictBox, { backgroundColor: verdictSoft[verdict] }]}>
+          {personal ? <Text variant="overline" style={{ color: tint }}>For you</Text> : null}
+          <Text style={[styles.verdictWord, { color: tint }]}>{verdictLabel[verdict]}</Text>
+          <Text variant="bodyStrong">{personal?.headline ?? report.verdictLine}</Text>
+          {personal ? (
+            <View style={styles.general}>
+              <Text variant="caption">
+                For most people: <Text variant="caption" style={{ color: verdictColor[report.verdict] }}>{verdictLabel[report.verdict]}</Text>
+                {" · "}
+                {report.verdictLine}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </FadeIn>
+
+      {personal && (personal.matches.length || personal.conflicts.length) ? (
+        <ReportSection title="Why, for you">
+          <EvidenceList
+            title="Fits what you care about"
+            items={personal.matches}
+            sources={report.sources}
+            tint={colors.buy}
+            icon={Icon.CheckCircle}
+            meta={(i) => ({ label: factorLabel(personal.matches[i].factor).toUpperCase(), color: colors.textMuted })}
+          />
+          <EvidenceList
+            title="Works against you"
+            items={personal.conflicts}
+            sources={report.sources}
+            tint={colors.avoid}
+            icon={Icon.Warning}
+            meta={(i) => ({
+              label: factorLabel(personal.conflicts[i].factor).toUpperCase(),
+              color: personal.conflicts[i].strength === "strong" ? colors.avoid : colors.textMuted,
+            })}
+          />
+        </ReportSection>
+      ) : null}
 
       {report.bestFor.length || report.notFor.length ? (
         <ReportSection title="Who it's for">
@@ -115,6 +165,8 @@ export function ReportView({ product, report }: { product: ProductIdentity; repo
       ) : null}
 
       <AlternativesSection alternatives={report.alternatives} />
+
+      {footer}
 
       <View style={styles.deeper}>
         <Text variant="overline">Go deeper</Text>
@@ -197,6 +249,7 @@ const styles = StyleSheet.create({
   scroll: { padding: space(4), gap: space(4) },
   hero: { gap: space(2), paddingVertical: space(2) },
   verdictBox: { marginTop: space(2), padding: space(4), gap: space(1), borderRadius: radius.lg, borderCurve: "continuous" },
+  general: { marginTop: space(2), paddingTop: space(2), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   verdictWord: { fontFamily: fonts.extrabold, fontSize: 40, lineHeight: 46, letterSpacing: -1 },
   row: { flexDirection: "row", alignItems: "center", gap: space(3) },
   bullets: { gap: space(2) },

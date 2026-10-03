@@ -56,6 +56,7 @@ const ALL_WORKLOADS: Workload[] = [
   "insight_version",
   "insight_scam",
   "insight_best_in_category",
+  "personalize",
 ];
 
 /** zai.glm-5 - Bedrock model card id (Converse + Mantle Chat Completions).

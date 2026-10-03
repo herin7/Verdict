@@ -3,6 +3,8 @@ import { logger } from "../logging/logger.js";
 import { identifyFromUrl, isJunkProductName } from "../identify/fromUrl.js";
 import { callToolIdentifyFromQuery, callToolIdentifyFromScreenshot } from "../identify/llmFallback.js";
 import { researchProduct } from "../services/research.js";
+import { getProfile } from "../profile/repository.js";
+import { personalizeVerdict, type PersonalVerdict } from "../profile/personalize.js";
 import { normalizeCountry } from "../marketplaces/registry.js";
 import type { ProductIdentity } from "../schema.js";
 import { getShare, updateShare, type ShareRow } from "./repository.js";
@@ -24,8 +26,12 @@ class NeedsInput extends Error {}
  * step looks at what's already stored and skips work that's done, so a retry
  * after a crash continues instead of starting over.
  *
- *   queued → identifying → researching → ready
+ *   queued → identifying → researching → (personalizing) → ready
  *                 ↘ needs_input              ↘ failed (after MAX_ATTEMPTS)
+ *
+ * Research is shared: one report per product, reused across users. The
+ * personal verdict is not: it weighs that report against this user's buyer
+ * profile and is stored on their share.
  */
 export async function processShare(shareId: string): Promise<void> {
   const share = await getShare(shareId);
@@ -63,14 +69,31 @@ export async function processShare(shareId: string): Promise<void> {
         onStep: (step) => updateShare(shareId, { stage: STAGE[step] }),
       })
     );
-    timings.total = Date.now() - started;
-    await updateShare(shareId, { status: "ready", stage: null, productId: outcome.productId, timings });
-    log.info({ cached: outcome.cached, totalMs: timings.total, verdict: outcome.report.verdict }, "share_ready");
 
-    // 3. Notify (never fails the share)
+    // 3. Personalize against the buyer profile (never fails the share - the general verdict still stands)
+    let personal: PersonalVerdict | null = null;
+    const profile = await getProfile(share.userId).catch(() => null);
+    if (profile) {
+      await updateShare(shareId, { stage: STAGE.personalizing });
+      personal = await timed("personalize", () => personalizeVerdict(product!, outcome.report, profile)).catch((err) => {
+        log.warn({ err }, "personalize_failed");
+        return null;
+      });
+    }
+
+    timings.total = Date.now() - started;
+    await updateShare(shareId, { status: "ready", stage: null, productId: outcome.productId, personal, timings });
+    log.info(
+      { cached: outcome.cached, totalMs: timings.total, verdict: outcome.report.verdict, personalVerdict: personal?.verdict },
+      "share_ready"
+    );
+
+    // 4. Notify (never fails the share)
     const sent = await notifyUser(share.userId, {
       title: `Verdict is ready: ${product.name}`,
-      body: `${outcome.report.verdict.toUpperCase()} · ${outcome.report.verdictLine}`,
+      body: personal
+        ? `${personal.verdict.toUpperCase()} for you · ${personal.headline}`
+        : `${outcome.report.verdict.toUpperCase()} · ${outcome.report.verdictLine}`,
       url: `verdict://item/${shareId}`,
     });
     if (sent > 0) await updateShare(shareId, { notifiedAt: new Date() });

@@ -45,7 +45,7 @@ function Status({ item }: { item: InboxItem }) {
   const share = item.server;
   if (item.pending) return <Text variant="subhead">Sending…</Text>;
   if (share?.status === "ready" && share.report) {
-    const verdict = share.report.verdict;
+    const verdict = share.personal?.verdict ?? share.report.verdict;
     return (
       <View style={styles.ready}>
         <View style={[styles.pill, { backgroundColor: verdictSoft[verdict] }]}>
@@ -54,7 +54,7 @@ function Status({ item }: { item: InboxItem }) {
           </Text>
         </View>
         <Text variant="subhead" numberOfLines={1} style={styles.flex}>
-          {share.report.verdictLine}
+          {share.personal?.headline ?? share.report.verdictLine}
         </Text>
       </View>
     );

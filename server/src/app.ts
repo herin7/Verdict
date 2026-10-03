@@ -8,6 +8,7 @@ import { shutdownPosthog } from "./analytics/posthog.js";
 import { authPlugin } from "./auth/plugin.js";
 import { dbAvailable, getDb, withDbRetry } from "./db/client.js";
 import { insightsRoute } from "./routes/insights.js";
+import { profileRoute } from "./routes/profile.js";
 import { sharesRoute } from "./routes/shares.js";
 
 /** Builds the HTTP application without binding a port, so it is integration-testable. */
@@ -48,6 +49,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 async function registerFeatures(app: FastifyInstance): Promise<void> {
   await app.register(sharesRoute);
   await app.register(insightsRoute);
+  await app.register(profileRoute);
 }
 
 function registerHealthEndpoint(app: FastifyInstance): void {

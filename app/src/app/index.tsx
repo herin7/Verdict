@@ -58,7 +58,10 @@ export default function Inbox() {
             <Text variant="display" accessibilityRole="header" style={styles.title}>
               Verdict
             </Text>
-            <IconButton icon={Icon.SignOut} label="Sign out" onPress={confirmSignOut} />
+            <View style={styles.actions}>
+              <IconButton icon={Icon.Fingerprint} label="Your buyer DNA" onPress={() => router.push("/profile")} />
+              <IconButton icon={Icon.SignOut} label="Sign out" onPress={confirmSignOut} />
+            </View>
           </View>
           <Field
             icon={Icon.LinkSimple}
@@ -93,6 +96,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { gap: space(4), paddingHorizontal: space(4), paddingBottom: space(3) },
   titleRow: { flexDirection: "row", alignItems: "center" },
+  actions: { flexDirection: "row", gap: space(2) },
   title: { flex: 1, fontSize: 34, lineHeight: 40 },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: space(4) + 56 + space(3) },
 });

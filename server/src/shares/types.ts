@@ -16,5 +16,6 @@ export const STAGE = {
   identifying: "Working out the product",
   searching: "Finding reviews and owner reports",
   reading_sources: "Reading what owners say",
-  writing: "Writing your verdict",
+  writing: "Writing the verdict",
+  personalizing: "Matching it to your priorities",
 } as const;

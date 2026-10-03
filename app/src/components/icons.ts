@@ -4,6 +4,8 @@ import type { Icon as PhosphorIcon } from "phosphor-react-native";
 import { CaretRightIcon } from "phosphor-react-native/src/icons/CaretRight";
 import { CaretDownIcon } from "phosphor-react-native/src/icons/CaretDown";
 import { CaretUpIcon } from "phosphor-react-native/src/icons/CaretUp";
+import { CaretLeftIcon } from "phosphor-react-native/src/icons/CaretLeft";
+import { FingerprintIcon } from "phosphor-react-native/src/icons/Fingerprint";
 import { ShareNetworkIcon } from "phosphor-react-native/src/icons/ShareNetwork";
 import { SparkleIcon } from "phosphor-react-native/src/icons/Sparkle";
 import { CameraIcon } from "phosphor-react-native/src/icons/Camera";
@@ -51,6 +53,8 @@ export const Icon = {
   CaretRight: CaretRightIcon,
   CaretDown: CaretDownIcon,
   CaretUp: CaretUpIcon,
+  CaretLeft: CaretLeftIcon,
+  Fingerprint: FingerprintIcon,
   ShareNetwork: ShareNetworkIcon,
   Sparkle: SparkleIcon,
   Camera: CameraIcon,

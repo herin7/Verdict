@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx src/marketplaces/registry.test.ts && tsx src/marketplaces/normalize.test.ts && tsx test/ai-gateway.test.ts && tsx test/consensus-report-schema.test.ts && tsx test/http-reliability.test.ts && tsx test/content-hash.test.ts && tsx test/identify-url.test.ts && tsx test/app.test.ts",
+    "test": "tsx src/marketplaces/registry.test.ts && tsx src/marketplaces/normalize.test.ts && tsx test/ai-gateway.test.ts && tsx test/consensus-report-schema.test.ts && tsx test/http-reliability.test.ts && tsx test/content-hash.test.ts && tsx test/identify-url.test.ts && tsx test/app.test.ts && tsx test/personalize.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

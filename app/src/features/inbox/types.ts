@@ -1,4 +1,4 @@
-import type { ConsensusReport, ProductIdentity } from "../../types";
+import type { ConsensusReport, PersonalVerdict, ProductIdentity } from "../../types";
 
 export type ShareStatus = "queued" | "identifying" | "researching" | "ready" | "needs_input" | "failed";
 
@@ -14,6 +14,8 @@ export interface ServerShare {
   imageUrl: string | null;
   product: ProductIdentity | null;
   report: ConsensusReport | null;
+  /** Null when the user had no buyer profile yet, or personalising failed. */
+  personal: PersonalVerdict | null;
   error: string | null;
   createdAt: number;
   updatedAt: number;

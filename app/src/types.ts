@@ -73,3 +73,16 @@ export interface BestInCategory {
   competitors: { name: string; comparison: "better" | "worse" | "similar"; note: string }[];
   summary: string;
 }
+
+/** A buyer-profile factor touched by a piece of report evidence. */
+export interface FactorPoint extends CitedPoint {
+  factor: string;
+}
+
+/** The report weighed against this user's buyer profile (server profile/personalize.ts). */
+export interface PersonalVerdict {
+  verdict: Verdict;
+  headline: string;
+  matches: FactorPoint[];
+  conflicts: (FactorPoint & { strength: "strong" | "minor" })[];
+}
