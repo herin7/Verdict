@@ -9,8 +9,8 @@ import { colors, fonts, motion, radius, shadow, space } from "../../theme";
 type Option = { key: string; label: string };
 
 /**
- * Big tappable answers. Short lists stack; long lists (more than four) go two
- * per row so all eight fit on one screen without scrolling.
+ * Big tappable answers, one full-width row each. Long lists (more than four)
+ * use slightly shorter rows so they fit with little or no scrolling.
  * `badge` is what sits in the corner of a selected card: a check, or its rank.
  */
 export function OptionList({
@@ -24,9 +24,9 @@ export function OptionList({
   badge?: (key: string) => string | null;
   onPick: (key: string) => void;
 }) {
-  const grid = options.length > 4;
+  const compact = options.length > 4;
   return (
-    <View style={[styles.list, grid && styles.grid]}>
+    <View style={[styles.list, compact && styles.listCompact]}>
       {options.map((o) => {
         const selected = isSelected(o.key);
         const mark = selected ? (badge?.(o.key) ?? null) : null;
@@ -37,7 +37,7 @@ export function OptionList({
             accessibilityRole={badge ? "checkbox" : "radio"}
             accessibilityState={{ checked: selected }}
             accessibilityLabel={mark && mark !== "✓" ? `${o.label}, ranked ${mark}` : o.label}
-            style={[styles.option, grid && styles.optionGrid, selected && styles.optionOn]}
+            style={[styles.option, compact && styles.optionCompact, selected && styles.optionOn]}
           >
             <Text variant="bodyStrong" style={[styles.optionLabel, selected && styles.optionLabelOn]} numberOfLines={2}>
               {o.label}
@@ -158,7 +158,7 @@ const THUMB = 32;
 
 const styles = StyleSheet.create({
   list: { gap: space(3) },
-  grid: { flexDirection: "row", flexWrap: "wrap" },
+  listCompact: { gap: space(2) },
   option: {
     flexDirection: "row",
     alignItems: "center",
@@ -173,9 +173,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     boxShadow: shadow.card,
   },
-  // Two per row that always fill it: a fixed % plus the gap overflowed narrow
-  // phones, so every card wrapped onto its own half-empty row.
-  optionGrid: { flexGrow: 1, flexBasis: "40%", minHeight: 72, paddingHorizontal: space(4), alignItems: "flex-start" },
+  optionCompact: { minHeight: 52, paddingVertical: space(3) },
   optionOn: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
   optionLabel: { flex: 1, fontSize: 17 },
   optionLabelOn: { color: colors.primary },
