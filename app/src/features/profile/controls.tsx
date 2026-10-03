@@ -173,8 +173,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     boxShadow: shadow.card,
   },
-  // two per row: (100% - one gap) / 2
-  optionGrid: { width: "48.5%", minHeight: 72, paddingHorizontal: space(4), alignItems: "flex-start" },
+  // Two per row that always fill it: a fixed % plus the gap overflowed narrow
+  // phones, so every card wrapped onto its own half-empty row.
+  optionGrid: { flexGrow: 1, flexBasis: "40%", minHeight: 72, paddingHorizontal: space(4), alignItems: "flex-start" },
   optionOn: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
   optionLabel: { flex: 1, fontSize: 17 },
   optionLabelOn: { color: colors.primary },
